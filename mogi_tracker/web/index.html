@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MKWorld Mogi Tracker</title>
+<link rel="icon" href="/static/icon.png">
+<link rel="stylesheet" href="/fonts.css">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="backdrop" aria-hidden="true"></div>
+
+<header class="top">
+  <h1 class="brand"><span class="brand-small">MKWORLD</span><span class="brand-big">MOGI TRACKER</span></h1>
+  <div class="setup">
+    <div class="field">
+      <span class="field-label">Players</span>
+      <div class="seg" id="seg-lobby" role="group" aria-label="Players in the room"></div>
+    </div>
+    <div class="field">
+      <span class="field-label">Format</span>
+      <div class="seg" id="seg-format" role="group" aria-label="Team format"></div>
+    </div>
+  </div>
+  <button class="round-btn" id="btn-settings" type="button" aria-label="Settings" title="Settings">
+    <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor">
+      <circle cx="12" cy="12" r="8.2" stroke-width="3.6" stroke-dasharray="3.4 3.04" transform="rotate(-11 12 12)"/>
+      <circle cx="12" cy="12" r="5.2" stroke-width="3.2"/>
+    </svg>
+  </button>
+</header>
+
+<section class="racebar" aria-label="Race progress">
+  <div class="race-count"><span class="race-word">RACE</span><span class="race-num" id="race-num">–</span><span class="race-of">/12</span></div>
+  <div class="flags" id="flags" aria-hidden="true"></div>
+  <div class="race-note" id="race-note" hidden></div>
+  <div class="message" id="message" role="status" aria-live="polite"></div>
+</section>
+
+<section class="notices" id="notices" aria-live="polite"></section>
+
+<main class="board" id="board" aria-label="Team standings"></main>
+
+<footer class="dock">
+  <form class="adjust" id="adjust" autocomplete="off">
+    <span class="field-label">Add points</span>
+    <input id="adj-tag" class="input" type="text" placeholder="Tag" aria-label="Team tag" maxlength="16" spellcheck="false">
+    <input id="adj-points" class="input input-num" type="text" inputmode="numeric" placeholder="±pts" aria-label="Points to add" maxlength="5">
+    <button class="pill-btn" type="submit">Add</button>
+  </form>
+  <div class="dock-side">
+    <button class="pill-btn ghost" id="btn-undo" type="button" disabled>Undo</button>
+    <button class="pill-btn ghost" id="btn-bank" type="button" title="Move the board's scores into the bank before a new room starts">Bank all</button>
+    <button class="pill-btn ghost" id="btn-reset" type="button">New mogi</button>
+  </div>
+  <div class="dock-main">
+    <button class="pill-btn big" id="btn-copy" type="button">Copy</button>
+    <button class="capture" id="btn-capture" type="button">
+      <span class="capture-in"><span id="capture-label">CAPTURE</span><kbd id="capture-key" hidden></kbd></span>
+    </button>
+  </div>
+</footer>
+
+<div class="scrim" id="scrim" hidden></div>
+<aside class="drawer" id="drawer" aria-label="Settings" hidden>
+  <div class="drawer-head">
+    <h2>Settings</h2>
+    <button class="round-btn" id="btn-close" type="button" aria-label="Close settings">✕</button>
+  </div>
+
+  <section class="group">
+    <h3>Capture from</h3>
+    <div class="seg wide" id="seg-source" role="group" aria-label="Capture source"></div>
+    <div class="seg wide" id="seg-monitor" role="group" aria-label="Screen" hidden></div>
+    <p class="hint" id="source-hint"></p>
+  </section>
+
+  <section class="group">
+    <h3>Capture hotkey</h3>
+    <div class="line">
+      <kbd class="keycap" id="hotkey-cap">–</kbd>
+      <button class="pill-btn" id="btn-hotkey" type="button">Change</button>
+      <button class="pill-btn ghost" id="btn-hotkey-clear" type="button">Clear</button>
+    </div>
+  </section>
+
+  <section class="group">
+    <h3>My tag</h3>
+    <input id="my-tag" class="input" type="text" placeholder="e.g. A" aria-label="My team's tag" maxlength="16" spellcheck="false">
+    <p class="hint">Highlights your team</p>
+  </section>
+
+  <section class="group">
+    <h3>Copied text</h3>
+    <label class="check"><input type="checkbox" id="auto-copy"> Copy the scores after every capture</label>
+    <label class="check"><input type="checkbox" id="mark-my-tag"> Mark my tag with ** **</label>
+  </section>
+
+  <section class="group">
+    <h3>OBS overlay</h3>
+    <div class="seg wide" id="seg-overlay" role="group" aria-label="Overlay layout"></div>
+    <div class="line">
+      <input id="overlay-url" class="input grow" type="text" readonly aria-label="Overlay address">
+      <button class="pill-btn" id="btn-overlay-copy" type="button">Copy</button>
+    </div>
+    <p class="hint">Add a Browser Source in OBS with this address. App has to be running</p>
+    <p class="hint" id="overlay-size"></p>
+  </section>
+
+  <section class="group">
+    <h3>Look</h3>
+    <div class="seg wide" id="seg-background" role="group" aria-label="Background"></div>
+  </section>
+
+  <section class="group">
+    <h3>Last capture</h3>
+    <button class="pill-btn ghost" id="btn-last" type="button">Open folder</button>
+  </section>
+
+  <p class="credits"><span id="credits"></span> <button class="link-btn" id="btn-licences" type="button">Licences</button></p>
+</aside>
+
+<script>window.MKW_TOKEN = "__TOKEN__";</script>
+<script src="/static/app.js"></script>
+</body>
+</html>

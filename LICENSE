@@ -1,0 +1,48 @@
+MIT License
+
+Copyright (c) 2026 Nolanimations
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+The fonts in mogi_tracker/web/fonts are not covered by the licence above:
+
+- RacersDelight.otf ("Racers Delight") by @ImWhoreHay
+- MPLUS1p-ExtraBold.ttf by the M+ Project, under the SIL Open Font License
+  1.1 (see mogi_tracker/web/fonts/MPLUS1p-OFL.txt)
+
+The OCR model is not covered by the licence above either:
+
+- mogi_tracker/model/rec.onnx (the scoreboard reader model) is by Nolanimations. It is not part of the source
+  code and is not included in this repository.
+- It is a fine-tuned version of the PP-OCRv4 Japanese text recognition model from PaddleOCR
+  (https://github.com/PaddlePaddle/PaddleOCR), copyright PaddlePaddle Authors, which is licensed under the Apache
+  License 2.0 (see third_party/PaddleOCR-LICENSE.txt). The terms below cover the changes made by the fine-tuning
+  and the model as a whole, they do not take away anyone's rights to the original PaddleOCR model.
+- It is built into the official MKWorldMogiTracker.exe releases, and you may use it there, as part of the app.
+- Please do not extract it from the app, copy it, redistribute or publish it, or use it in another project
+  (including to train or fine-tune other models) without asking the author first.
+- It can be requested from the author. If it is shared, it is on the condition that these terms are followed.
+
+The typefaces of Mario Kart World were used to render the model's synthetic training images. No font data
+is part of the model or of this software, and no rights to those typefaces are claimed. They belong to their
+owners.
+
+The character list (dict) is covered by the licence above.
