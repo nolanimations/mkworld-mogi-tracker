@@ -5,7 +5,6 @@ Most rooms should group easily based on the first character of the name, but if 
 """
 import collections
 import difflib
-import re
 import unicodedata
 
 TEAM_SIZES = {"2v2": 2, "3v3": 3, "4v4": 4, "6v6": 6, "8v8": 8, "12v12": 12}

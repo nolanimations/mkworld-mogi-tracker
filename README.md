@@ -65,7 +65,7 @@ in `**` in the copied text if you enable it in settings
 
 ## OBS overlay
 
-![OBS ovelay](docs/overlay.png)
+![OBS overlay](docs/overlay.png)
 
 1. Copy the overlay address from settings
 2. In OBS, add a **Browser** with that address. Set the size to **1920 × 120** for the bar (horizontal) or
@@ -82,8 +82,15 @@ You can also fix the layout or the size in the address: `…/overlay?layout=list
 - `I` and `l`, and `O` and `0`, look identical in-game. The tracker treats them as the same letter when
   it matches tags
 - Very small marks in a name, like an apostrophe, can be missed. This does not affect scores
-- Settings, log and the the last capture are stored in `%APPDATA%\MKWorld Mogi Tracker`
+- Settings, log and the last capture are stored in `%APPDATA%\MKWorld Mogi Tracker`
 - The text recognition model is ran on CPU
+
+## Found a bug?
+
+The tracker is in beta. Message **@Nolanimations** on Discord, and if it's about a capture:
+
+- grab the screenshot of the race where it messed up: **Settings → Last capture → Open folder**. Ideally you have recorded footage (especially for autocapture) but a screenshot will do
+- `tracker.log` from `%APPDATA%\MKWorld Mogi Tracker`
 
 ## Running from source
 

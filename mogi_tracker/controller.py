@@ -240,7 +240,7 @@ class Controller:
 
     def _do_bank_all(self, _):
         if self.session.bank_all():
-            self.say("Scroes saved, ready for reopen", "good")
+            self.say("Scores saved, ready for reopen", "good")
         else:
             self.say("No scores to save")
 
