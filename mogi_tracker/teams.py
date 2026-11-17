@@ -6,6 +6,7 @@ Most rooms should group easily based on the first character of the name, but if 
 import collections
 import difflib
 import re
+import unicodedata
 
 TEAM_SIZES = {"2v2": 2, "3v3": 3, "4v4": 4, "6v6": 6, "8v8": 8, "12v12": 12}
 LOBBY_SIZES = (24, 12)
@@ -21,13 +22,19 @@ def parse_team_format(team_format: str, lobby_size: int = 24):
     return {"team_size": size, "expected_teams": lobby_size // size}
 
 
+def upper_latin(s: str) -> str:
+    """Capitalise Latin letters only, so "a" and "A" are one tag. Other scripts keep their own case: a capital
+    can look like a different letter (Greek μ becomes Μ, which reads as M)"""
+    return "".join(c.upper() if c.isascii() or "LATIN" in unicodedata.name(c, "") else c for c in s)
+
+
 def get_first_char_key(name: str) -> str:
     if not name:
         return "?"
     s = str(name).strip()
     if not s:
         return "?"
-    return s[0].upper()
+    return upper_latin(s[0])
 
 
 def extract_tokens(name: str) -> list[str]:
@@ -40,11 +47,11 @@ def extract_tokens(name: str) -> list[str]:
         if ch.isalnum() or ch in TAG_SYMBOLS:
             current.append(ch)
         elif current:
-            tokens.append("".join(current).upper())
+            tokens.append(upper_latin("".join(current)))
             current = []
 
     if current:
-        tokens.append("".join(current).upper())
+        tokens.append(upper_latin("".join(current)))
 
     return tokens
 
@@ -171,7 +178,7 @@ def merge_groups_by_numeric_suffix(grouping):
 
 def shared_prefix_label(names) -> str:
     """Longest prefix shared by at least half the team (min 2 players)"""
-    compact = ["".join(n.split()).upper() for n in names]
+    compact = [upper_latin("".join(n.split())) for n in names]
     if len(compact) < 2:
         return ""
     needed = max(2, (len(compact) + 1) // 2)
@@ -219,7 +226,7 @@ def team_label_for_group(players, fallback_key: str) -> str:
         if len(top_token) <= 8:
             return top_token
 
-    prefixes = [n[:3].upper() for n in names if len(n) >= 3]
+    prefixes = [upper_latin(n[:3]) for n in names if len(n) >= 3]
     if prefixes:
         return min(collections.Counter(prefixes).items(), key=lambda kv: (-kv[1], kv[0]))[0]
 
@@ -361,9 +368,9 @@ def assign_final_teams(grouping):
         label = team_label_for_group(members, key)
         # Two teams with one label would be merged into one row
         base, n = label, 2
-        while "".join(label.split()).upper() in used:
+        while upper_latin("".join(label.split())) in used:
             label, n = f"{base}{n}", n + 1
-        used.add("".join(label.split()).upper())
+        used.add(upper_latin("".join(label.split())))
         for player in members:
             player["final_team"] = label
 

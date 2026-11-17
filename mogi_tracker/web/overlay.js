@@ -58,7 +58,31 @@
     }
   }
 
+  const SHUFFLE = { duration: 520, easing: "cubic-bezier(.2,.8,.2,1)" };
+
+  function places() {
+    return new Map([...root.querySelectorAll(".cell[data-key]")].map((c) => [c.dataset.key, [c.offsetLeft, c.offsetTop]]));
+  }
+
+  function shuffle(before) {
+    let moved = false;
+    for (const cell of root.querySelectorAll(".cell[data-key]")) {
+      const was = before.get(cell.dataset.key);
+      if (!was) continue;
+      const dx = was[0] - cell.offsetLeft, dy = was[1] - cell.offsetTop;
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue;
+      moved = true;
+      cell.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], SHUFFLE);
+    }
+    if (moved) {
+      for (const gap of root.querySelectorAll(".diff, .seam")) {
+        gap.animate([{ opacity: 0 }, { opacity: 0, offset: 0.7 }, { opacity: 1 }], SHUFFLE);
+      }
+    }
+  }
+
   function draw(state) {
+    const before = places();
     const layout = params.get("layout") || state.settings.overlay_layout;
     let teams = state.teams;
     if (!teams.length) {
@@ -70,6 +94,7 @@
     teams.forEach((t, i) => {
       const diff = i && t.gap !== null ? `+${t.gap}` : null;
       const cell = el("div", "cell" + (t.mine ? " mine" : ""));
+      if (t.key) cell.dataset.key = t.key;
       if (layout === "list") {
         cell.append(el("span", "rank r" + t.rank, t.rank), el("span", "tag", t.short || t.tag), el("span", "score", t.total));
         if (diff) cell.append(el("span", "seam", diff));
@@ -88,6 +113,7 @@
     root.replaceChildren(box);
     fit();
     shrinkTags();
+    shuffle(before);
   }
 
   function connect() {

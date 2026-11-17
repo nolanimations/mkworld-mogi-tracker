@@ -306,3 +306,17 @@ def test_short_labels_follow_the_clipboard_rule():
     s.bank = {"AB": 30, "AC": 20, "X1": 10, "Q": 5}
     s.display = {"AB": "Ab", "AC": "AC", "X1": "X1", "Q": "Queen"}
     assert [r["short"] for r in s.standings()] == ["AB", "AC", "X1", "Q"]
+
+
+def test_greek_tags_keep_their_own_letter():
+    from mogi_tracker.session import label_of, team_key
+    from mogi_tracker.teams import upper_latin
+    assert label_of("μ") == "μ" and team_key("μ") == "μ"       # the capital of μ is M, could be confusing
+    assert label_of("ab") == "AB" and upper_latin("é★x") == "É★X"
+    assert label_of("ねこ") == "ねこ"
+    s = Session(24, "4v4")
+    s.apply_capture([{"full_name": n, "white_score": 10, "green_score": 0}
+                     for n in ("μ 1st", "μ-Bran", "μ2nd", "μ Lia", "M a", "M b", "M c", "M d")] +
+                    [{"full_name": f"{t} {k}", "white_score": 5, "green_score": 0} for t in "ABCD" for k in range(4)])
+    tags = {t["tag"] for t in s.standings()}
+    assert "μ" in tags and "M" in tags

@@ -6,8 +6,12 @@ import shutil
 import threading
 import time
 
-from . import __version__, capture, hotkey, ocr, paths, settings
-from .session import Session
+import cv2
+import numpy as np
+from PIL import Image
+
+from . import __version__, autocapture, capture, hotkey, ocr, paths, settings
+from .session import TOTAL_RACES, Session
 
 log = logging.getLogger(__name__)
 
@@ -28,7 +32,11 @@ class Controller:
         self.hotkey = hotkey.Hotkey(self.capture)
         if self.settings["hotkey"] and not self.hotkey.set(self.settings["hotkey"]):
             self.settings["hotkey"] = ""
+        self.watcher = None
+        self._watch_source = None
+        self.watch_error = ""
         threading.Thread(target=self._warm_up, daemon=True).start()
+        self._sync_watcher()
 
     # state
     def state(self) -> dict:
@@ -38,9 +46,10 @@ class Controller:
                 "busy": self.busy,
                 "message": self.message,
                 "settings": {k: self.settings[k] for k in
-                             ("source", "monitor", "my_tag", "mark_my_tag", "auto_copy", "overlay_layout",
-                              "background")},
+                             ("source", "monitor", "my_tag", "mark_my_tag", "auto_copy", "auto_capture",
+                              "overlay_layout", "background")},
                 "hotkey": {"combo": self.hotkey.combo, "recording": self.hotkey.recording},
+                "watching": {"on": self.watcher is not None, "error": self.watch_error},
                 "overlay_url": f"http://127.0.0.1:{self.port}/overlay",
                 "version": __version__,
             })
@@ -90,7 +99,9 @@ class Controller:
 
             result = ocr.analyze(taken(), lobby)
             seconds = time.perf_counter() - start
-            self._save_last_capture(frames, result, lobby, seconds)
+            self._save_last_capture(frames, {"lobby": lobby, "seconds": round(seconds, 2), "players": result["players"],
+                                             "merged": result["merged"], "warnings": result["warnings"],
+                                             "frames_read": result["frames_read"]})
             players = result["players"]
             if len(players) * MIN_SHARE < lobby:
                 found = f"only {len(players)} players detected" if players else "no results found"
@@ -98,13 +109,7 @@ class Controller:
                 return
             rows = result["frames"][-1]["rows"]
             tidy = lobby != 12 or [r["ti"] for r in rows] == list(range(len(rows)))
-            with self.lock:
-                self.session.apply_capture(players, tidy_board=tidy)
-            copied = self.settings["auto_copy"] and self._copy_scores()
-            if len(players) < lobby:
-                self.say(f"Only {len(players)} of {lobby} players were read.", "bad")
-            else:
-                self.say("Scores copied." if copied else "", "good")
+            self._apply(players, lobby, tidy)
         except capture.CaptureError as e:
             self.say(str(e), "bad")
         except Exception as e:
@@ -114,20 +119,84 @@ class Controller:
             self.busy = False
             self.changed()
 
+    def _apply(self, players, lobby, tidy, auto=False):
+        with self.lock:
+            if auto and self.session.same_board(players):
+                return     # already captured
+            self.session.apply_capture(players, tidy_board=tidy)
+            race = self.session.race_info()["number"]
+        copied = self.settings["auto_copy"] and self._copy_scores()
+        if len(players) < lobby:
+            self.say(f"Only {len(players)} of {lobby} players were read.", "bad")
+        elif auto:
+            self.say(f"Race {race} captured" + (", scores copied" if copied else ""), "good")
+        else:
+            self.say("Scores copied." if copied else "", "good")
+
     @staticmethod
-    def _save_last_capture(frames, result, lobby, seconds):
+    def _save_last_capture(frames, record):
         """Helps diagnosing any malformed captures"""
         try:
             folder = paths.last_capture_dir()
             shutil.rmtree(folder, ignore_errors=True)
             folder.mkdir(parents=True, exist_ok=True)
             for i, img in enumerate(frames):
+                if isinstance(img, np.ndarray):
+                    img = Image.fromarray(cv2.cvtColor(np.ascontiguousarray(img), cv2.COLOR_BGR2RGB))
                 img.convert("RGB").save(folder / f"frame_{i}.jpg", "JPEG", quality=90)
-            record = {"lobby": lobby, "seconds": round(seconds, 2), "players": result["players"],
-                      "merged": result["merged"], "warnings": result["warnings"], "frames_read": result["frames_read"]}
             (folder / "result.json").write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
         except OSError as e:
             log.warning("could not save the last capture: %s", e)
+
+    # auto-capture
+    def _sync_watcher(self):
+        want = self.settings["auto_capture"]
+        source = (self.settings["source"], self.settings["monitor"])
+        if self.watcher and (not want or source != self._watch_source):
+            self.watcher.stop()
+            self.watcher, self.watch_error = None, ""
+        if want and not self.watcher:
+            self._watch_source = source
+            self.watcher = autocapture.Watcher(*source, lambda: self.session.lobby, self._auto_begin,
+                                               self._auto_result, self._auto_error).start()
+
+    def _auto_begin(self):
+        with self.lock:
+            if self.busy or self.hotkey.recording:
+                return False
+            self.busy = True
+        self.changed()
+        return True
+
+    def _auto_result(self, outcome):
+        try:
+            lobby = outcome["lobby"]
+            if outcome.get("missed") and outcome.get("seen", 0) * 4 < lobby:
+                log.info("auto-capture: no scoreboard after all (%s players read)", outcome.get("seen", 0))
+                return
+            self._save_last_capture(outcome.get("frames", []), {
+                "lobby": lobby, "auto": True, "missed": bool(outcome.get("missed")),
+                "players": outcome.get("players", []), "warnings": outcome.get("warnings", [])})
+            if outcome.get("failed"):
+                self.say("Auto-capture could not read the scoreboard, see tracker.log", "bad")
+            elif outcome.get("missed"):
+                final = self.session.race_info()["number"] == TOTAL_RACES - 1
+                self.say("Missed the final scoreboard. Add last race's points by hand" if final else
+                         "Missed this race's scoreboard. It should catch up after the next race", "bad")
+            else:
+                self._apply(outcome["players"], lobby, outcome["tidy"], auto=True)
+        except Exception as e:
+            log.exception("auto-capture result failed")
+            self.say(f"Capture failed: {e}", "bad")
+        finally:
+            self.busy = False
+            self.changed()
+
+    def _auto_error(self, text):
+        self.watch_error = text
+        if text:
+            self.say(f"Auto-capture: {text}", "bad")
+        self.changed()
 
     # actions
     def act(self, action, data):
@@ -220,12 +289,14 @@ class Controller:
                 self.say("capture once the scoreboard finishes adding points")
         if "format" in data:
             self.session.set_format(str(data["format"]))
-        for key in ("source", "monitor", "my_tag", "mark_my_tag", "auto_copy", "overlay_layout", "background"):
+        for key in ("source", "monitor", "my_tag", "mark_my_tag", "auto_copy", "auto_capture", "overlay_layout",
+                    "background"):
             if key in data and (key not in settings.OPTIONS or data[key] in settings.OPTIONS[key]):
                 self.settings[key] = data[key]
         if "source" in data:
             capture.release()
         self._save_settings()
+        self._sync_watcher()
 
     def _do_hotkey(self, data):
         if data.get("clear"):
@@ -260,4 +331,6 @@ class Controller:
 
     def close(self):
         self.hotkey.close()
+        if self.watcher:
+            self.watcher.stop()
         capture.release()

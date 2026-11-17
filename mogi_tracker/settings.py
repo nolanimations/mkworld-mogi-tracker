@@ -12,6 +12,7 @@ DEFAULTS = {
     "my_tag": "",
     "mark_my_tag": True,
     "auto_copy": False,
+    "auto_capture": False,
     "overlay_layout": "bar",
     "background": "dark",
     "port": 12424,

@@ -365,6 +365,20 @@ button { cursor: pointer; }
   animation: stripes 0.7s linear infinite;
 }
 @keyframes stripes { to { background-position: -78px 0; } }
+/* auto-capture on: a small checkered flag, it waits for the finish */
+.auto-chip {
+  display: inline-flex; align-items: center; gap: 7px; margin-right: 2px; cursor: default;
+  font-family: var(--f-race); font-style: italic; font-size: 17px; line-height: 1; color: var(--yellow);
+  text-shadow: -1.5px 0 var(--ui-ink), 1.5px 0 var(--ui-ink), 0 -1.5px var(--ui-ink), 0 1.5px var(--ui-ink),
+               1.5px 2.5px 0 rgba(0, 0, 0, 0.35);
+}
+.auto-chip::before {
+  content: ""; width: 17px; height: 12px; border-radius: 2px; transform: skewX(-12deg);
+  background: repeating-conic-gradient(#fff 0 25%, #1d1613 0 50%) 0 0 / 6px 6px;
+  box-shadow: 0 0 0 1.5px var(--ui-ink), 1.5px 2px 0 rgba(0, 0, 0, 0.35);
+}
+.auto-chip.bad { color: #9a9590; }
+.auto-chip.bad::before { background: repeating-conic-gradient(#ff8a80 0 25%, #1d1613 0 50%) 0 0 / 6px 6px; }
 kbd {
   font-family: var(--f-ui); font-style: normal; font-weight: 800; font-size: 13px; line-height: 1;
   min-width: 26px; padding: 5px 7px; border-radius: 7px; text-align: center; text-transform: uppercase;

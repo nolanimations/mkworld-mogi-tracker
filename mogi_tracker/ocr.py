@@ -34,6 +34,7 @@ BASELINE_IN_ROW = 51.5
 CROP_TOP_IN_ROW = BASELINE_IN_ROW - 45
 FIELD_CROPS = {"name": (1267, 1667), "total": (1735, 1830), "gain": (1650, 1745), "rank": (1100, 1190)}
 
+CONTESTED = 0.6           # merge: a second score with this share of the winner's weight makes a rank contested
 POINTS_TABLE_24 = [15, 12, 10, 9, 9, 8, 8, 7, 7, 6, 6, 6, 5, 5, 5, 4, 4, 4, 3, 3, 3, 2, 2, 1]
 
 MODEL_H, MODEL_W = 48, 320
@@ -130,6 +131,74 @@ def comb_phase(img, lo=76.9, hi=77.1):
     return best[1], best[2], best[0] / max(float(np.mean(sig)), 1e-6)
 
 
+_BOARD_PITCHES = np.arange(76.9, 77.1 + 1e-6, 0.05)
+_BOARD_COL_STEP = 8
+_comb_cache = {}
+
+
+def _comb_index(length):
+    if length not in _comb_cache:
+        rows = [np.round(np.arange(phase, length, pitch)).astype(int)
+                for pitch in _BOARD_PITCHES for phase in np.arange(0, pitch, 0.5)]
+        rows = [r[r < length] for r in rows]
+        width = max(len(r) for r in rows)
+        idx = np.zeros((len(rows), width), int)
+        mask = np.zeros((len(rows), width), np.float32)
+        for i, r in enumerate(rows):
+            idx[i, :len(r)], mask[i, :len(r)] = r, 1
+        _comb_cache[length] = (idx, mask, mask.sum(axis=1))
+    return _comb_cache[length]
+
+
+BOARD_ROW_EDGE = 5.0
+
+
+def board_signal(img, x_from=0):
+    s = img.shape[0] / 1080
+    strip = img[int(BOARD_TOP_MIN * s):int(BOARD_BOTTOM_MAX * s),
+                int((1075 - x_from) * s):int((1900 - x_from) * s):max(1, round(_BOARD_COL_STEP * s)), :3]
+    g = cv2.cvtColor(np.ascontiguousarray(strip), cv2.COLOR_BGR2GRAY)
+    if g.shape[0] != BOARD_BOTTOM_MAX - BOARD_TOP_MIN:
+        g = cv2.resize(g, (g.shape[1], BOARD_BOTTOM_MAX - BOARD_TOP_MIN), interpolation=cv2.INTER_AREA)
+    sig = np.median(np.abs(np.diff(g.astype(np.float32), axis=0)), axis=1)
+    base = float(sig.mean())
+    if base <= 1e-6:
+        return 0.0, 0.0, 0
+    idx, mask, counts = _comb_index(len(sig))
+    scores = (sig[idx] * mask).sum(axis=1) / counts
+    best = int(scores.argmax())
+    rows = int(((sig[idx[best]] >= BOARD_ROW_EDGE) & (mask[best] > 0)).sum())
+    return float(scores[best]) / base, float(scores[best]), rows
+
+
+def ranks_in_order(img) -> bool:
+    """True if the rank column of a 1080p BGR frame reads like results"""
+    tops = row_tops(img, 24)
+    crops = [(ti, crop_field(img, "rank", top)) for ti, top in enumerate(tops)]
+    crops = [(ti, c) for ti, c in crops if c is not None]
+    if not crops:
+        return False
+    ranks = {}
+    for (ti, _), (text, _conf) in zip(crops, get_reader().recognise([c for _, c in crops])):
+        rank = parse_int(text)
+        if rank is not None and 1 <= rank <= 24:
+            ranks[ti] = rank
+    # ties
+    steps = wrong = tied = 0
+    for ti in sorted(ranks):
+        if ti + 1 not in ranks:
+            tied = 0
+            continue
+        a, b = ranks[ti], ranks[ti + 1]
+        if b == a:
+            tied += 1
+        elif b == a + 1 + tied:
+            steps, tied = steps + 1, 0
+        else:
+            wrong, tied = wrong + 1, 0
+    return len(ranks) >= 3 and steps >= 2 and wrong <= 1
+
+
 def row_tops(img, lobby):
     if lobby == 12:
         return [ROW_TOP_12P + k * ROW_PITCH_12P for k in range(12)]
@@ -179,12 +248,14 @@ def parse_int(text, signed=False):
 
 
 # One frame
-def read_frame(img, lobby=24):
+def read_frame(img, lobby=24, gains=False):
+    """gains: 12p reads the +N column too, so a board that is still adding points gives the final totals
+    (24p always does)"""
     img = to_bgr(img)
     if img is None:
         raise ValueError("frame is not 16:9")
     tops = row_tops(img, lobby)
-    kinds = ["name", "total"] + (["gain", "rank"] if lobby == 24 else [])
+    kinds = ["name", "total"] + (["gain", "rank"] if lobby == 24 else ["gain"] if gains else [])
     jobs = [(ti, kind, crop_field(img, kind, top)) for ti, top in enumerate(tops) for kind in kinds]
     jobs = [(ti, kind, c) for ti, kind, c in jobs if c is not None]
     reads = get_reader().recognise([c for _, _, c in jobs]) if jobs else []
@@ -209,6 +280,12 @@ def read_frame(img, lobby=24):
             row["gain"] = gain if gain is not None else 0
             # the OCR model is trained with +N digits in mind but 12p doesn't need those, +N not being there shouldn't lower the confidence of the model
             row["conf"] = min(row["conf"], f["rank"][1], f["gain"][1] if "gain" in f and f["gain"][0].strip() else 1.0)
+        elif "gain" in f and f["gain"][0].strip():
+            gain = parse_int(f["gain"][0], signed=True)
+            if gain is None:
+                continue   # can't tell this row's final total
+            row["gain"] = gain
+            row["conf"] = min(row["conf"], f["gain"][1])
         rows.append(row)
 
     if lobby == 24:
@@ -297,7 +374,11 @@ def merge_frames(frame_rows):
         pick = next(r for r in rows if r["gain"] + r["total"] == best_sum)
         if len(sum_w) > 1:
             warnings.append(f"#{slot[0]}: frames disagree on score {dict(sum_w)}, using {best_sum}")
-        players.append({"rank": slot[0], "name": name, "gain": pick["gain"], "total": pick["total"], "seen": len(rows)})
+        weights = sorted(sum_w.values(), reverse=True)
+        contested = len(weights) > 1 and weights[1] >= CONTESTED * weights[0]
+        players.append({"rank": slot[0], "name": name, "gain": pick["gain"], "total": pick["total"], "seen": len(rows),
+                        "contested": contested,
+                        "support": sum(r["gain"] + r["total"] == best_sum for r in rows)})   # readings that agree
     return players, warnings
 
 

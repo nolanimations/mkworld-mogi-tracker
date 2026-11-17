@@ -33,11 +33,14 @@ def main():
     parser.add_argument("--no-window", action="store_true", help="only run the local server (dev)")
     parser.add_argument("--data-dir", help="dev: keep settings and the last capture in this folder")
     parser.add_argument("--test-frames", help="dev: replay saved frames instead of capturing in-game")
+    parser.add_argument("--test-video", help="dev: play a recording in real time as if it were the screen")
     args = parser.parse_args()
     if args.data_dir:
         os.environ["MKW_TRACKER_DATA_DIR"] = args.data_dir
     if args.test_frames:
         os.environ["MKW_TRACKER_TEST_FRAMES"] = args.test_frames
+    if args.test_video:
+        os.environ["MKW_TRACKER_TEST_VIDEO"] = args.test_video
 
     _setup_logging()
     log = logging.getLogger("mogi_tracker")

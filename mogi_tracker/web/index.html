@@ -55,6 +55,7 @@
     <button class="pill-btn ghost" id="btn-reset" type="button">New mogi</button>
   </div>
   <div class="dock-main">
+    <span class="auto-chip" id="auto-chip" hidden>AUTO</span>
     <button class="pill-btn big" id="btn-copy" type="button">Copy</button>
     <button class="capture" id="btn-capture" type="button">
       <span class="capture-in"><span id="capture-label">CAPTURE</span><kbd id="capture-key" hidden></kbd></span>
@@ -83,6 +84,12 @@
       <button class="pill-btn" id="btn-hotkey" type="button">Change</button>
       <button class="pill-btn ghost" id="btn-hotkey-clear" type="button">Clear</button>
     </div>
+  </section>
+
+  <section class="group">
+    <h3>Auto-capture (EXPERIMENTAL)</h3>
+    <label class="check"><input type="checkbox" id="auto-capture"> Capture automatically after a race</label>
+    <p class="hint">Please do NOT spam the A button after a race it kinda works if you do but it's better if you don't</p>
   </section>
 
   <section class="group">

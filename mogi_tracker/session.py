@@ -19,11 +19,11 @@ _FOLD = str.maketrans({"l": "I", "0": "O"})
 
 
 def label_of(tag) -> str:
-    return re.sub(r"\s+", "", str(tag or "")).upper() or "?"
+    return teams.upper_latin(re.sub(r"\s+", "", str(tag or ""))) or "?"
 
 
 def team_key(tag) -> str:
-    return re.sub(r"\s+", "", str(tag or "")).translate(_FOLD).upper() or "?"
+    return teams.upper_latin(re.sub(r"\s+", "", str(tag or "")).translate(_FOLD)) or "?"
 
 
 def player_key(name) -> str:
@@ -160,6 +160,12 @@ class Session:
         new_roster = self._roster_of(grouped)
         self._notice(new_roster, live_before, tidy_board)
         self.roster = new_roster
+
+    def same_board(self, players):
+        if not self.last_players:
+            return False
+        new = sorted(p["white_score"] + p["green_score"] for p in players)
+        return new == sorted(p["total"] for p in self.last_players)
 
     # DCs
     def _suggest(self, sid, kind, text, button, adds):

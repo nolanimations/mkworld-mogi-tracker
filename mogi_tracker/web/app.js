@@ -89,7 +89,7 @@
     }
     if (state.format_hint) {
       const n = el("div", "notice");
-      n.append(el("p", "", `It looks like this mogi has ${state.format_hint} teams, but ${state.format} is selected.`));
+      n.append(el("p", "", `This looks like a ${state.format_hint} mogi, but ${state.format} is selected.`));
       const b = el("button", "pill-btn gold", `Switch to ${state.format_hint}`);
       b.addEventListener("click", () => post("settings", { format: state.format_hint }));
       n.append(b);
@@ -125,9 +125,11 @@
       const empty = el("div", "empty");
       empty.append(el("div", "empty-title", "READY TO RACE"));
       const key = state.hotkey.combo ? ` or press ${prettyKey(state.hotkey.combo)}` : "";
-      empty.append(el("p", "", state.lobby === 12
-        ? `Hit Capture${key} once the scoreboard finishes adding points`
-        : `Hit Capture${key} the moment the scoreboard starts moving`));
+      empty.append(el("p", "", state.settings.auto_capture
+        ? "Auto-capture is on, please give the game time to show all the results!"
+        : state.lobby === 12
+          ? `Hit Capture${key} once the scoreboard finishes adding points`
+          : `Hit Capture${key} the moment the scoreboard starts moving`));
       board.replaceChildren(empty);
       return;
     }
@@ -194,6 +196,10 @@
     undo.disabled = !state.undo || busy;
     undo.textContent = state.undo ? `Undo ${state.undo}` : "Undo";
     for (const id of ["btn-bank", "btn-reset"]) $(id).disabled = busy;
+    const chip = $("auto-chip"), w = state.watching;
+    chip.hidden = !w.on;
+    chip.classList.toggle("bad", Boolean(w.error));
+    chip.title = w.error || "Auto-capture is watching for the scoreboard";
   }
 
   function confirmButton(id, armedText, action) {
@@ -234,6 +240,7 @@
     if (document.activeElement !== $("my-tag")) $("my-tag").value = s.my_tag;
     $("mark-my-tag").checked = s.mark_my_tag;
     $("auto-copy").checked = s.auto_copy;
+    $("auto-capture").checked = s.auto_capture;
     drawSeg("seg-overlay", [["bar", "Bar"], ["list", "List"]], s.overlay_layout, (v) => post("settings", { overlay_layout: v }));
     $("overlay-url").value = state.overlay_url;
     $("overlay-size").textContent = `Source size: ${OVERLAY_SIZE[s.overlay_layout]}`;
@@ -314,6 +321,7 @@
   $("my-tag").addEventListener("change", (e) => post("settings", { my_tag: e.target.value }));
   $("mark-my-tag").addEventListener("change", (e) => post("settings", { mark_my_tag: e.target.checked }));
   $("auto-copy").addEventListener("change", (e) => post("settings", { auto_copy: e.target.checked }));
+  $("auto-capture").addEventListener("change", (e) => post("settings", { auto_capture: e.target.checked }));
   $("btn-overlay-copy").addEventListener("click", async () => {
     $("overlay-url").select();
     try { await navigator.clipboard.writeText($("overlay-url").value); } catch { document.execCommand("copy"); }

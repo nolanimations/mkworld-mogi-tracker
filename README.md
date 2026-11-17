@@ -29,6 +29,14 @@ Windows may show a "Windows protected your PC" notice the first time, because th
    - **12p:** capture once the scoreboard finishes adding points like usual
 4. Also has a text output that you can share: `A 124 | B 73 | C 67 | @8`
 
+### Auto-capture
+
+Enable **Auto-capture** in settings and the app reads the scoreboard by itself after every race.
+**AUTO** next to the Capture button means it's watching
+
+- Give the game time to properly show results. If you start spamming A it usually still works, but if the
+  results are gone before the tracker can see them, it tells you
+
 ### Adding points by hand
 
 Type a tag and a number in **Add points** or click a team to fill in its tag. Negative numbers subtract from a team
