@@ -1,3 +1,4 @@
+import threading
 import numpy as np
 
 from mogi_tracker import autocapture, ocr
@@ -162,7 +163,7 @@ def test_same_board_is_not_captured_twice():
 
 def _fake_ranks(monkeypatch, texts):
     """rank column reads `texts` top to bottom"""
-    monkeypatch.setattr(ocr, "row_tops", lambda img, lobby: [40 + 77 * k for k in range(len(texts))])
+    monkeypatch.setattr(ocr, "row_tops", lambda img, lobby, team=None: [40 + 77 * k for k in range(len(texts))])
 
     class Reader:
         def recognise(self, crops):
@@ -191,7 +192,7 @@ def test_24p_read_skips_frames_without_plus_points(monkeypatch):
     scroll = [row(r, f"P{r}", 0, ocr.POINTS_TABLE_24[r - 1]) for r in range(1, 25)]
     sorted_board = [row(r, f"P{25 - r}", r, 0) for r in range(1, 25)]
     frames = iter([sorted_board, scroll, sorted_board, scroll])
-    monkeypatch.setattr(ocr, "read_frame", lambda img, lobby: next(frames))
+    monkeypatch.setattr(ocr, "read_frame", lambda img, lobby, team=None: next(frames))
     job = autocapture._Read24([np.zeros((1080, 1920 - autocapture.KEEP_FROM_X, 3), np.uint8)] * 4)
     job.end()
     out = job.run()
@@ -205,12 +206,12 @@ def test_24p_read_with_a_misread_total_is_a_miss_not_wrong_scores(monkeypatch):
                 "top": rank * 77, "ti": rank}
     good = [row(r, 30) for r in range(1, 25)]
     misread = [row(r, 30) for r in range(1, 24)] + [row(24, 3)]
-    monkeypatch.setattr(ocr, "read_frame", lambda img, lobby: misread)
+    monkeypatch.setattr(ocr, "read_frame", lambda img, lobby, team=None: misread)
     job = autocapture._Read24([np.zeros((1080, 1920 - autocapture.KEEP_FROM_X, 3), np.uint8)])
     job.end()
     assert job.run()["missed"]
     frames = iter([misread, good, good])
-    monkeypatch.setattr(ocr, "read_frame", lambda img, lobby: next(frames))
+    monkeypatch.setattr(ocr, "read_frame", lambda img, lobby, team=None: next(frames))
     job = autocapture._Read24([np.zeros((1080, 1920 - autocapture.KEEP_FROM_X, 3), np.uint8)] * 3)
     job.end()
     out = job.run()
@@ -221,7 +222,7 @@ def test_24p_read_with_a_misread_total_is_a_miss_not_wrong_scores(monkeypatch):
 def test_24p_board_with_a_rejoined_player_is_fine(monkeypatch):
     rows = [{"rank": r, "name": f"P{r}", "total": 0 if r == 14 else 40, "gain": ocr.POINTS_TABLE_24[r - 1],
              "conf": 0.9, "top": r * 77, "ti": r} for r in range(1, 25)]
-    monkeypatch.setattr(ocr, "read_frame", lambda img, lobby: rows)
+    monkeypatch.setattr(ocr, "read_frame", lambda img, lobby, team=None: rows)
     job = autocapture._Read24([np.zeros((1080, 1920 - autocapture.KEEP_FROM_X, 3), np.uint8)] * 2)
     job.end()
     assert "missed" not in job.run()
@@ -233,7 +234,7 @@ def test_24p_frames_where_points_are_being_added_are_left_out(monkeypatch):
     scroll = [row(r, f"P{r}", 10, ocr.POINTS_TABLE_24[r - 1]) for r in range(1, 25)]
     resorting = [row(r, f"P{25 - r}", 50, 3 if r < 4 else 0) for r in range(1, 25)]
     frames = iter([scroll, resorting, resorting, scroll])
-    monkeypatch.setattr(ocr, "read_frame", lambda img, lobby: next(frames))
+    monkeypatch.setattr(ocr, "read_frame", lambda img, lobby, team=None: next(frames))
     job = autocapture._Read24([np.zeros((1080, 1920 - autocapture.KEEP_FROM_X, 3), np.uint8)] * 4)
     job.end()
     out = job.run()
@@ -249,7 +250,7 @@ def test_24p_own_row_pinned_at_the_bottom_is_no_tie(monkeypatch):
     bottom = [row(r, r) for r in range(6, 19)] + [row(18, 14)]
     rest = [row(r, r) for r in range(12, 25)]
     frames = iter([top, bottom, rest, top, bottom, rest])
-    monkeypatch.setattr(ocr, "read_frame", lambda img, lobby: next(frames))
+    monkeypatch.setattr(ocr, "read_frame", lambda img, lobby, team=None: next(frames))
     job = autocapture._Read24([np.zeros((1080, 1920 - autocapture.KEEP_FROM_X, 3), np.uint8)] * 6)
     job.end()
     out = job.run()
@@ -259,9 +260,45 @@ def test_24p_own_row_pinned_at_the_bottom_is_no_tie(monkeypatch):
 def test_12p_board_with_11_players_is_taken(monkeypatch):
     rows = [{"rank": k + 1, "name": f"P{k}", "total": 30 - k, "gain": 0, "conf": 0.9, "top": 37 + 77 * k, "ti": k}
             for k in range(11)]
-    monkeypatch.setattr(ocr, "read_frame", lambda img, lobby, gains=False: rows)
+    monkeypatch.setattr(ocr, "read_frame", lambda img, lobby, gains=False, team=None: rows)
     job = autocapture._Read12()
     job.latest(np.zeros((1080, 1920 - autocapture.KEEP_FROM_X, 3), np.uint8))
     monkeypatch.setattr(autocapture, "READ_EVERY", 0.01)
     out = job.run()
     assert "missed" not in out and len(out["players"]) == 11 and out["tidy"]
+
+
+def test_24p_team_board_drops_reads_from_before_it_was_recognised(monkeypatch):
+    def row(rank, total):
+        return {"rank": rank, "name": f"P{rank}", "total": total, "gain": ocr.POINTS_TABLE_24[rank - 1], "conf": 0.9,
+                "top": rank * 77, "ti": rank}
+    garbage = [row(2, 7), row(23, 30), row(24, 30)]       # only a few rows are in yet
+    good = [row(r, 30) for r in range(1, 25)]
+    reads = iter([(garbage, False), (garbage, False), (good, True), (good, True)])
+
+    def read_frame(img, lobby, team=None):
+        rows, team_board = next(reads)
+        assert team == team_board
+        return rows
+    looks = iter([False, False, True, True])
+    monkeypatch.setattr(ocr, "team_board", lambda img, tops: next(looks))
+    monkeypatch.setattr(ocr, "read_frame", read_frame)
+    job = autocapture._Read24([np.zeros((1080, 1920 - autocapture.KEEP_FROM_X, 3), np.uint8)] * 4)
+    job.end()
+    out = job.run()
+    assert "missed" not in out
+    assert sum(p["white_score"] + p["green_score"] for p in out["players"]) == 24 * 30 + 144
+
+
+def test_cancel_ends_the_read_going_on(monkeypatch):
+    monkeypatch.setattr(ocr, "read_frame", lambda img, lobby, gains=False, team=None: [])
+    watcher = autocapture.Watcher("screen", 0, lambda: 12, lambda: True, lambda outcome: None, lambda text: None)
+    job = autocapture._Read12()
+    job.latest(np.zeros((1080, 1920 - autocapture.KEEP_FROM_X, 3), np.uint8))
+    watcher._job = job
+    out = {}
+    reader = threading.Thread(target=lambda: out.update(job.run()))
+    reader.start()
+    watcher.cancel()
+    reader.join(timeout=5)
+    assert not reader.is_alive() and out["missed"]

@@ -5,13 +5,15 @@ import os
 import shutil
 import threading
 import time
+import webbrowser
 
 import cv2
 import numpy as np
 from PIL import Image
 
-from . import __version__, autocapture, capture, hotkey, ocr, paths, settings
-from .session import TOTAL_RACES, Session
+from . import __version__, autocapture, capture, hotkey, ocr, paths, settings, updates
+from . import session as places_session, session_classic
+from .session import TOTAL_RACES
 
 log = logging.getLogger(__name__)
 
@@ -21,11 +23,14 @@ MIN_SHARE = 2   # a capture counts only if at least 1/MIN_SHARE of the room was 
 class Controller:
     def __init__(self):
         self.settings = settings.load()
-        self.session = Session(self.settings["lobby"], self.settings["format"])
+        engine = session_classic if self.settings["scoring"] == "classic" else places_session
+        self.session = engine.Session(self.settings["lobby"], self.settings["format"])
+        log.info("scoring: %s", self.settings["scoring"])
         self.lock = threading.RLock()
         self.changed_cond = threading.Condition()
         self.version = 0
         self.busy = False
+        self.cancelled = False 
         self.typing = False
         self.message = {"id": 0, "text": "", "tone": "info"}
         self.port = self.settings["port"]
@@ -35,7 +40,11 @@ class Controller:
         self.watcher = None
         self._watch_source = None
         self.watch_error = ""
+        self.update = None          # newer release
+        self.updating = False
+        self.quit = None
         threading.Thread(target=self._warm_up, daemon=True).start()
+        threading.Thread(target=self._check_update, daemon=True).start()
         self._sync_watcher()
 
     # state
@@ -44,6 +53,7 @@ class Controller:
             st = self.session.snapshot(self.settings["my_tag"])
             st.update({
                 "busy": self.busy,
+                "cancelling": self.busy and self.cancelled,
                 "message": self.message,
                 "settings": {k: self.settings[k] for k in
                              ("source", "monitor", "my_tag", "mark_my_tag", "auto_copy", "auto_capture",
@@ -52,6 +62,8 @@ class Controller:
                 "watching": {"on": self.watcher is not None, "error": self.watch_error},
                 "overlay_url": f"http://127.0.0.1:{self.port}/overlay",
                 "version": __version__,
+                "update": self.update and {"version": self.update["version"], "updating": self.updating,
+                                           "auto": updates.can_install(self.update) and self.quit is not None},
             })
             return st
 
@@ -67,6 +79,48 @@ class Controller:
         self.settings["lobby"], self.settings["format"] = self.session.lobby, self.session.format
         self.settings = settings.save(self.settings)
 
+    def _check_update(self):
+        update = updates.latest()
+        if update:
+            log.info("version %s is available", update["version"])
+            with self.lock:
+                self.update = update
+            self.changed()
+
+    def _do_update(self, data):
+        up = self.update
+        if not up or self.updating:
+            return {"ok": False}
+        if data.get("page") or not (updates.can_install(up) and self.quit):
+            webbrowser.open(up["page"])
+            return None
+        self.updating = True
+        self.say(f"Downloading version {up['version']}...")
+        threading.Thread(target=self._install_update, args=(up,), daemon=True).start()
+        return None
+
+    def _install_update(self, up):
+        try:
+            exe = updates.install(up)
+        except Exception as e:
+            log.exception("update failed")
+            with self.lock:
+                self.updating = False
+                self.say(f"Could not update by itself ({e}), opening the download page instead", "bad")
+            self.changed()
+            webbrowser.open(up["page"])
+            return
+        try:
+            updates.start(exe)
+        except Exception:
+            log.exception("could not start the new version")
+            with self.lock:
+                self.say(f"Updated to {up['version']}, restart the app to use it")
+            self.changed()
+            return
+        log.info("updated to %s, restarting", up["version"])
+        self.quit()
+
     def _warm_up(self):
         try:
             ocr.warm_up()
@@ -80,7 +134,7 @@ class Controller:
         with self.lock:
             if self.busy or self.typing or self.hotkey.recording:
                 return False
-            self.busy = True
+            self.busy, self.cancelled = True, False
         self.changed()
         threading.Thread(target=self._capture_job, daemon=True).start()
         return True
@@ -94,10 +148,15 @@ class Controller:
             def taken():
                 for frame in capture.stream(self.settings["source"], 1 if lobby == 12 else capture.BURST_COUNT,
                                             self.settings["monitor"]):
+                    if self.cancelled:
+                        return
                     frames.append(frame)
                     yield frame
 
             result = ocr.analyze(taken(), lobby)
+            if self.cancelled:
+                self.say("Capture cancelled")
+                return
             seconds = time.perf_counter() - start
             self._save_last_capture(frames, {"lobby": lobby, "seconds": round(seconds, 2), "players": result["players"],
                                              "merged": result["merged"], "warnings": result["warnings"],
@@ -164,13 +223,16 @@ class Controller:
         with self.lock:
             if self.busy or self.hotkey.recording:
                 return False
-            self.busy = True
+            self.busy, self.cancelled = True, False
         self.changed()
         return True
 
     def _auto_result(self, outcome):
         try:
             lobby = outcome["lobby"]
+            if self.cancelled:
+                self.say("Capture cancelled, auto-capture waits for the next race")
+                return
             if outcome.get("missed") and outcome.get("seen", 0) * 4 < lobby:
                 log.info("auto-capture: no scoreboard after all (%s players read)", outcome.get("seen", 0))
                 return
@@ -214,6 +276,18 @@ class Controller:
 
     def _do_capture(self, _):
         return {"ok": self.capture()}
+
+    def _do_cancel(self, _):
+        if not self.busy or self.cancelled:
+            return {"ok": False}
+        self.cancelled = True
+        log.info("capture cancelled")
+        if self.watcher:
+            self.watcher.cancel()
+        return None
+
+    def _do_custom_tag(self, data):
+        return {"ok": self.session.set_custom_tag(str(data.get("key", "")), data.get("tag", ""))}
 
     def _do_typing(self, data):
         self.typing = bool(data.get("on"))

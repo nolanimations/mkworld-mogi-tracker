@@ -7,7 +7,7 @@ import sys
 import threading
 import webbrowser
 
-from . import APP_NAME, paths, server
+from . import APP_NAME, paths, server, updates
 from .controller import Controller
 
 
@@ -34,6 +34,7 @@ def main():
     parser.add_argument("--data-dir", help="dev: keep settings and the last capture in this folder")
     parser.add_argument("--test-frames", help="dev: replay saved frames instead of capturing in-game")
     parser.add_argument("--test-video", help="dev: play a recording in real time as if it were the screen")
+    parser.add_argument("--after-update", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.data_dir:
         os.environ["MKW_TRACKER_DATA_DIR"] = args.data_dir
@@ -44,6 +45,7 @@ def main():
 
     _setup_logging()
     log = logging.getLogger("mogi_tracker")
+    updates.clean_up(wait=20 if args.after_update else 0)
     controller = Controller()
     try:
         _, url = server.start(controller)
@@ -55,13 +57,25 @@ def main():
         return
     log.info("serving on %s", url)
 
+    stop = threading.Event()
+
+    def quit_app():
+        stop.set()
+        try:
+            import webview
+            for window in list(webview.windows):
+                window.destroy()
+        except Exception:
+            pass
+    controller.quit = quit_app
+
     try:
         if args.no_window:
             print(url)
-            threading.Event().wait()
+            stop.wait()
         elif args.browser or not _open_window(url, log):
             webbrowser.open(url)
-            threading.Event().wait()
+            stop.wait()
     except KeyboardInterrupt:
         pass
     finally:

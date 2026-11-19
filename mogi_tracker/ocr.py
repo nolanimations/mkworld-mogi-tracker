@@ -34,7 +34,10 @@ BASELINE_IN_ROW = 51.5
 CROP_TOP_IN_ROW = BASELINE_IN_ROW - 45
 FIELD_CROPS = {"name": (1267, 1667), "total": (1735, 1830), "gain": (1650, 1745), "rank": (1100, 1190)}
 
-CONTESTED = 0.6           # merge: a second score with this share of the winner's weight makes a rank contested
+CONTESTED = 0.6
+TEAM_ROW_SATURATION = 90
+TEAM_BOARD_ROWS = 7
+TEAM_BOARD_FRAMES = 2
 POINTS_TABLE_24 = [15, 12, 10, 9, 9, 8, 8, 7, 7, 6, 6, 6, 5, 5, 5, 4, 4, 4, 3, 3, 3, 2, 2, 1]
 
 MODEL_H, MODEL_W = 48, 320
@@ -174,7 +177,8 @@ def board_signal(img, x_from=0):
 def ranks_in_order(img) -> bool:
     """True if the rank column of a 1080p BGR frame reads like results"""
     tops = row_tops(img, 24)
-    crops = [(ti, crop_field(img, "rank", top)) for ti, top in enumerate(tops)]
+    team = team_board(img, tops)
+    crops = [(ti, crop_field(img, "rank", top, team)) for ti, top in enumerate(tops)]
     crops = [(ti, c) for ti, c in crops if c is not None]
     if not crops:
         return False
@@ -211,12 +215,67 @@ def row_tops(img, lobby):
     return tops
 
 
-def crop_field(img, kind, top):
+def crop_field(img, kind, top, team=False):
     x0, x1 = FIELD_CROPS[kind]
     y0 = int(round(top + CROP_TOP_IN_ROW))
     if y0 < 0 or y0 + CROP_H > img.shape[0]:
         return None
-    return img[y0:y0 + CROP_H, x0:x1]
+    crop = img[y0:y0 + CROP_H, x0:x1]
+    return white_text(crop) if team and dark_text_row(crop) else crop
+
+
+def rank_at(img, top, team=False):
+    crop = crop_field(img, "rank", top, team)
+    if crop is None:
+        return None
+    rank = parse_int(get_reader().recognise([crop])[0][0])
+    return rank if rank is not None and 1 <= rank <= 24 else None
+
+
+def team_board(img, tops):
+    rows = 0
+    for top in tops:
+        y0 = int(round(top + CROP_TOP_IN_ROW))
+        x0, x1 = FIELD_CROPS["name"]
+        if 0 <= y0 and y0 + CROP_H <= img.shape[0]:
+            rows += dark_text_row(img[y0:y0 + CROP_H, x0:x1])
+    return rows >= TEAM_BOARD_ROWS
+
+
+class TeamMode:
+    """Whether the board being read is a team board"""
+
+    def __init__(self):
+        self.seen = 0
+
+    @property
+    def on(self):
+        return self.seen >= TEAM_BOARD_FRAMES
+
+    def check(self, img, lobby):
+        img = to_bgr(img)
+        team = img is not None and team_board(img, row_tops(img, lobby))
+        self.seen += team
+        return team or self.on
+
+
+def dark_text_row(crop):
+    """A strongly coloured crop with dark text and no white in it"""
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    if np.median(hsv[..., 1]) < TEAM_ROW_SATURATION:
+        return False
+    light = cv2.cvtColor(crop, cv2.COLOR_BGR2LAB)[..., 0].astype(np.float32)
+    bg = np.median(light)
+    white = (light > bg + 45).mean() > 0.03 or (crop.min(axis=2) > 215).mean() > 0.02
+    return not white and (light < bg - 30).mean() > 0.03
+
+
+def white_text(crop):
+    """Dark text on a coloured row -> white text on a dark row"""
+    light = cv2.cvtColor(crop, cv2.COLOR_BGR2LAB)[..., 0].astype(np.float32)
+    darker = np.clip((np.median(light) - light - 12) * 10, 0, 255)
+    text = (35 + darker * (220 / 255)).astype(np.uint8)
+    return cv2.merge([text, text, text])
 
 
 # Text clean-up
@@ -248,15 +307,17 @@ def parse_int(text, signed=False):
 
 
 # One frame
-def read_frame(img, lobby=24, gains=False):
+def read_frame(img, lobby=24, gains=False, team=None):
     """gains: 12p reads the +N column too, so a board that is still adding points gives the final totals
-    (24p always does)"""
+    (24p always does). team: read as a team board (None: this frame decides by itself)"""
     img = to_bgr(img)
     if img is None:
         raise ValueError("frame is not 16:9")
     tops = row_tops(img, lobby)
+    if team is None:
+        team = team_board(img, tops)
     kinds = ["name", "total"] + (["gain", "rank"] if lobby == 24 else ["gain"] if gains else [])
-    jobs = [(ti, kind, crop_field(img, kind, top)) for ti, top in enumerate(tops) for kind in kinds]
+    jobs = [(ti, kind, crop_field(img, kind, top, team)) for ti, top in enumerate(tops) for kind in kinds]
     jobs = [(ti, kind, c) for ti, kind, c in jobs if c is not None]
     reads = get_reader().recognise([c for _, _, c in jobs]) if jobs else []
     per_row = collections.defaultdict(dict)
@@ -393,13 +454,14 @@ def is_complete(players, lobby_size):
 
 
 def analyze(images, lobby_size=24):
-    frames, merged, warnings = [], [], []
+    frames, merged, warnings, mode = [], [], [], TeamMode()
     for img in images:
         start = time.perf_counter()
-        rows = read_frame(img, lobby_size)
-        frames.append({"rows": rows, "seconds": round(time.perf_counter() - start, 2)})
+        team = mode.check(img, lobby_size)
+        rows = read_frame(img, lobby_size, team=team)
+        frames.append({"rows": rows, "team": team, "seconds": round(time.perf_counter() - start, 2)})
         log.info("frame %d: %d rows in %ss", len(frames), len(rows), frames[-1]["seconds"])
-        merged, warnings = merge_frames([f["rows"] for f in frames])
+        merged, warnings = merge_frames([f["rows"] for f in frames if f["team"] or not mode.on])
         if is_complete(merged, lobby_size):
             break
     if len(merged) != lobby_size:

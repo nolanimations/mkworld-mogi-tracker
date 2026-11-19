@@ -1,7 +1,15 @@
-"""The scores of one mogi"""
+"""NEW SESSION LOGIC
+
+This session logic remembers *places*: a place starts with the player first seen there and remembers:
+- the team
+- the points of earlier occupants (`carried`): when a player leaves/a bot takes over or the player rejoins at 0,the
+  place remembers their last race (if captured in order).
+If it still has to guess it merely suggests
+"""
 import collections
 import copy
 import difflib
+import itertools
 import math
 import re
 import unicodedata
@@ -10,7 +18,6 @@ from . import teams
 
 TOTAL_RACES = 12
 POINTS_PER_RACE = {24: 144, 12: 82}
-# 11p race (dc with no bot)
 TABLE_11P = [12, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]
 UNDO_DEPTH = 20
 NAME_MATCH = 0.7
@@ -30,9 +37,54 @@ def player_key(name) -> str:
     return re.sub(r"\s+", "", unicodedata.normalize("NFKC", str(name or ""))).translate(_FOLD).casefold()
 
 
-class Session:
-    _FIELDS = ("lobby", "format", "bank", "live", "display", "members", "last_players", "prev_totals", "prev_ranks",
-               "roster", "absent", "suggestions")
+def _points(n):
+    return f"{n} point" if n == 1 else f"{n} points"
+
+
+def _alike(a, b):
+    return difflib.SequenceMatcher(None, a, b).ratio()
+
+
+MISREAD_ALIKE = 0.5    # misreads of one name measured 0.6+, two different names up to 0.44
+FITS_TOTAL = 0.05      # tie-break between two equally alike pairings: prefer the one where no total went down
+
+
+CUSTOM_TAG_MAX = 10
+
+
+class CustomTags:
+
+    def set_custom_tag(self, key, text):
+        if key not in self.keys():
+            return False
+        text = re.sub(r"\s+", " ", str(text or "")).strip()[:CUSTOM_TAG_MAX]
+        if text == self.custom.get(key, ""):
+            return True
+        self._push_undo("tag change")
+        if text:
+            self.custom[key] = text
+        else:
+            self.custom.pop(key, None)
+        return True
+
+    def _custom_match(self, typed, keys):
+        tags = {k: team_key(self.custom[k]) for k in keys if k in self.custom}
+        for hits in ([k for k, t in tags.items() if t == typed], [k for k, t in tags.items() if t.startswith(typed)]):
+            if len(hits) == 1:
+                return hits[0]
+        return None
+
+    def _with_custom(self, rows):
+        for r in rows:
+            r["read"], r["custom"] = r["tag"], r["key"] in self.custom
+            if r["custom"]:
+                r["tag"] = r["short"] = self.custom[r["key"]]
+        return rows
+
+
+class Session(CustomTags):
+    _FIELDS = ("lobby", "format", "bank", "display", "places", "last_players", "prev_totals", "prev_ranks",
+               "suggestions", "custom")
 
     def __init__(self, lobby=24, fmt="4v4"):
         self.lobby = lobby
@@ -42,14 +94,12 @@ class Session:
 
     def _clear(self):
         self.bank = {}
-        self.live = {}
         self.display = {}
-        self.members = {}
+        self.custom = {}
+        self.places = []
         self.last_players = []
-        self.prev_totals = None 
+        self.prev_totals = None
         self.prev_ranks = None
-        self.roster = []
-        self.absent = {}
         self.suggestions = []
 
     # undo
@@ -69,6 +119,20 @@ class Session:
         return self._undo[-1][0] if self._undo else None
 
     # totals
+    @property
+    def live(self):
+        out = {}
+        for pl in self.places:
+            out[pl["team"]] = out.get(pl["team"], 0) + pl["total"] + pl["carried"]
+        return out
+
+    @property
+    def members(self):
+        out = {}
+        for pl in sorted(self.places, key=lambda pl: pl["order"]):
+            out.setdefault(pl["team"], []).append({"name": pl["name"], "total": pl["total"] + pl["carried"]})
+        return out
+
     def keys(self):
         return set(self.live) | set(self.bank)
 
@@ -76,7 +140,8 @@ class Session:
         return self.live.get(key, 0) + self.bank.get(key, 0)
 
     def _totals(self):
-        return {k: self.total(k) for k in self.keys()}
+        live = self.live
+        return {k: live.get(k, 0) + self.bank.get(k, 0) for k in set(live) | set(self.bank)}
 
     def _ranks(self, totals=None):
         totals = self._totals() if totals is None else totals
@@ -106,7 +171,7 @@ class Session:
         self.lobby = lobby
         if self.format not in teams.formats_for(lobby):
             self.format = "4v4"
-        self.last_players, self.roster, self.absent = [], [], {}
+        self.last_players, self.places = [], []
 
     def set_format(self, fmt):
         if fmt == self.format or fmt not in teams.formats_for(self.lobby):
@@ -124,50 +189,356 @@ class Session:
     def _group(self, players):
         return teams.group_teams_first_char_primary(players, team_format=self.format, lobby_size=self.lobby)
 
-    def _apply_grouped(self, grouped):
-        self.live, self.members = {}, {}
-        for p in grouped:
-            tag = p.get("team_identifier") or "NoTag"
-            key = team_key(tag)
-            # keep the longest reading of a tag: "Splash" beats "S"
-            if key not in self.display or len(tag) > len(self.display[key]):
-                self.display[key] = tag
-            self.live[key] = self.live.get(key, 0) + p["total_score"]
-            self.members.setdefault(key, []).append({"name": p["name"], "total": p["total_score"]})
+    def _new_place(self, p, order):
+        pk = player_key(p["name"])
+        place = {"id": max((pl["id"] for pl in self.places), default=0) + 1, "origin": pk, "aliases": [pk],
+                 "pk": pk, "name": p["name"], "total": p["total_score"], "carried": 0, "away": False,
+                 "stand_in": False, "votes": {}, "team": None, "order": order}
+        self.places.append(place)
+        return place
 
-    def _regroup(self):
-        if not self.last_players:
-            return
-        players = [{"full_name": p["name"], "white_score": p["total"], "green_score": 0} for p in self.last_players]
-        grouped = self._group(players)
-        self._apply_grouped(grouped)
-        self.roster = self._roster_of(grouped)
+    def _match(self, grouped):
+        """Pair the players on the board with places. Returns ([(place, player)], unmatched places)"""
+        free = list(self.places)
+        pairs = []
+        by_pk = collections.defaultdict(list)
+        for p in grouped:
+            by_pk[player_key(p["name"])].append(p)
+        left = []
+        for pk, ps in by_pk.items():
+            mine = [pl for pl in free if pk in pl["aliases"] or pk == pl["pk"]]
+            if not mine:
+                left += ps
+                continue
+            ps = sorted(ps, key=lambda p: -p["total_score"])
+            mine = sorted(mine, key=lambda pl: -pl["total"])
+            for p, pl in zip(ps, mine):
+                pairs.append((pl, p))
+                free.remove(pl)
+            left += ps[len(mine):]
+        # nobody new joins a room mid-mogi (usually), so a name
+        # that wasn't there before is a misread or a stand-in (bot, sub, rejoin) for a place gone
+        # from the board. The totals decide which one it is (see _occupants).
+        # Until the whole room has been seen (partial 24p reads), an unlike name can also be a player that simply
+        # wasn't read yet: those get their own place while there are seats nobody was seen in.
+        # Equally alike names ("A ario": Mario or Wario?) go to the place whose total is just below theirs
+        alike = sorted(((max(_alike(player_key(p["name"]), a) for a in pl["aliases"] + [pl["pk"]]),
+                         p["total_score"] - pl["total"], i, j)
+                        for i, p in enumerate(left) for j, pl in enumerate(free)),
+                       key=lambda x: (-x[0], x[1] < 0, abs(x[1])))
+        unseen = max(0, self.lobby - len(self.places))
+
+        def misread(ratio, gain):
+            # a half-alike name with a lower total is more likely someone else than a misread
+            return ratio >= MISREAD_ALIKE and (gain >= 0 or ratio >= NAME_MATCH)
+
+        used_p, used_pl = set(), set()
+        for misreads_only in (True, False):
+            for ratio, gain, i, j in alike:
+                if i in used_p or j in used_pl or (misreads_only and not misread(ratio, gain)):
+                    continue
+                if not misreads_only and len(left) - len(used_p) <= unseen:
+                    break
+                used_p.add(i), used_pl.add(j)
+                pairs.append((free[j], left[i]))
+        extra = [p for i, p in enumerate(left) if i not in used_p]
+        gone = [pl for j, pl in enumerate(free) if j not in used_pl]
+        return self._untangle(pairs, extra, gone)
 
     @staticmethod
-    def _roster_of(grouped):
-        return [{"name": p["name"], "pk": player_key(p["name"]), "total": p["total_score"],
-                 "key": team_key(p.get("team_identifier") or "NoTag")} for p in grouped]
+    def _fit(pl, p):
+        """How well a board row fits a place. name likeness (1 for a known name), plus a little when the total did
+        not go down. An empty side (a row that gets a new place, a place nobody is in) fits 0"""
+        if pl is None or p is None:
+            return 0
+        pk = player_key(p["name"])
+        names = pl["aliases"] + [pl["pk"]]
+        alike = 1.0 if pk in names else max(_alike(pk, a) for a in names)
+        return alike + (FITS_TOTAL if p["total_score"] >= pl["total"] else 0)
+
+    def _untangle(self, pairs, extra, gone):
+        """Swap rows between places (or with a row that gets a new place, or a place nobody took) while that fits
+        the board better overall. Matching one row at a time can give a name that fits two places ("A ario":
+        Mario or Wario?) to the wrong one, and then its teammate's total goes "down" in the other place"""
+        slots = list(pairs) + [(None, p) for p in extra] + [(pl, None) for pl in gone]
+        fit = {}
+
+        def f(pl, p):
+            key = (id(pl), id(p))
+            if key not in fit:
+                fit[key] = self._fit(pl, p)
+            return fit[key]
+
+        better = True
+        while better:
+            better = False
+            for a, b in itertools.combinations(range(len(slots)), 2):
+                (pa, ra), (pb, rb) = slots[a], slots[b]
+                if (pa is None and rb is None) or (pb is None and ra is None) or (ra is None and rb is None):
+                    continue
+                if min(f(pa, ra), f(pb, rb)) >= 1 + FITS_TOTAL:
+                    continue
+                if f(pa, rb) + f(pb, ra) > f(pa, ra) + f(pb, rb) + 1e-9:
+                    slots[a], slots[b] = (pa, rb), (pb, ra)
+                    better = True
+        return ([(pl, p) for pl, p in slots if pl is not None and p is not None],
+                [p for pl, p in slots if pl is None], [pl for pl, p in slots if p is None])
 
     def apply_capture(self, players, tidy_board=True):
         grouped = self._group(players)
         self._push_undo("capture")
-        totals_before, ranks_before, live_before = self._totals(), self._ranks(), dict(self.live)
+        totals_before, ranks_before = self._totals(), self._ranks()
         had_scores = any(totals_before.values())
-        self._apply_grouped(grouped)
+        live_before = self.live
+        self.suggestions = [s for s in self.suggestions if s["kind"] != "note"]
+        order = {id(p): i for i, p in enumerate(grouped)}
+
+        skip = set()
+        if not self.places:
+            pairs = [(self._new_place(p, order[id(p)]), p) for p in grouped]
+            gone, notes = [], []
+        else:
+            pairs, extra, gone = self._match(grouped)
+            pairs += [(self._new_place(p, order[id(p)]), p) for p in extra]
+            if self._reopened(pairs):
+                self._suggest("room", "room", "Most totals went back down, looks like reopen? "
+                              f"The old room's {sum(live_before.values())} points are not banked yet",
+                              "Bank old room", [{"key": k, "points": pts} for k, pts in live_before.items() if pts])
+                for pl, p in pairs:
+                    pl["carried"], pl["away"], pl["stand_in"] = 0, False, False
+                self.places = [pl for pl, _ in pairs]
+                notes = []
+            else:
+                notes, skip = self._occupants(pairs, gone, tidy_board, first_seen=bool(extra))
+
+        pairs = [(pl, p) for pl, p in pairs if pl["id"] not in skip]
+        for pl, p in pairs:
+            pl.update(total=p["total_score"], name=p["name"], pk=player_key(p["name"]), order=order[id(p)],
+                      away=False)
+        self._vote_teams(pairs)
+        for text in notes:
+            self._suggest(f"note:{len(self.suggestions)}", "note", text, None, [])
         self.last_players = [{"name": p["name"], "total": p["total_score"]} for p in grouped]
         self.prev_totals = totals_before if had_scores else None
         self.prev_ranks = ranks_before if had_scores else None
-        new_roster = self._roster_of(grouped)
-        self._notice(new_roster, live_before, tidy_board)
-        self.roster = new_roster
+
+    def _reopened(self, pairs):
+        drops = [1 for pl, p in pairs if p["total_score"] < pl["total"]]
+        return len(drops) >= max(3, math.ceil(len(pairs) / 2))
+
+    def _occupants(self, pairs, gone, tidy_board, first_seen=False):
+        """Work out who is in each place now, returns notes. `first_seen`: someone on the board got a place just now
+        (24p, not read before), so how much they gained this race is unknown"""
+        notes = []
+        if self.lobby == 12 and tidy_board and len(pairs) < 12:
+            for pl in gone:
+                if not pl["away"]:
+                    pl["away"] = True
+                    notes.append(f"{pl['name']} left the room. Their {_points(pl['total'])} still count for "
+                                 f"{self._tag(pl['team'])}")
+        seen_all = all(pl["away"] for pl in gone)        # every known place is on the board (or away)
+        complete = seen_all and not first_seen            # every place's points this race are known
+
+        fixed, drops, unsure, back = [], [], [], []       # fixed: (place, player, started_at_0)
+        own = {}                                          # place id: the row is the place's own player
+        for pl, p in pairs:
+            pk, new = player_key(p["name"]), p["total_score"]
+            origin = self._is_origin(pl, pk)
+            current = pk == pl["pk"] or _alike(pk, pl["pk"]) >= NAME_MATCH
+            own[pl["id"]] = origin or (current and not pl["stand_in"])
+            if pl["away"] and own[pl["id"]]:
+                fixed.append((pl, p, True))               # rejoin at 0
+            elif origin and pl["stand_in"]:
+                back.append((pl, p))                      # back after a stand-in, or the "stand-in" was them misread
+            elif current and new < pl["total"]:
+                drops.append((pl, p))                     # same name, lower total: uncaught DC or misread
+            elif current:
+                fixed.append((pl, p, False))
+            else:
+                unsure.append((pl, p))
+
+        def gain(pl, p, fresh):
+            return p["total_score"] - (0 if fresh else pl["total"])
+
+        base = sum(gain(*f) for f in fixed) + sum(p["total_score"] for _, p in drops)
+        names_changed = bool(unsure)
+        answer = self._adds_up(base, unsure + back) if complete else None
+        skip = set()
+        if answer is None:
+            back_answer = [True] * len(back)              # can't tell: they rejoined at 0
+            # the race can't tell, so nothing happens by itself: on a board with rows missing the pairing itself
+            # may be off (leave those places as they were), otherwise a lower total is a suggestion like any drop
+            rest = []
+            for pl, p in unsure:
+                if not seen_all:
+                    skip.add(pl["id"])
+                elif p["total_score"] < pl["total"]:
+                    drops.append((pl, p))
+                else:
+                    rest.append((pl, p))
+            unsure, answer = rest, [False] * len(rest)
+        else:
+            answer, back_answer = answer[:len(unsure)], answer[len(unsure):]
+        decided = fixed + [(pl, p, fresh) for (pl, p), fresh in zip(unsure + back, answer + back_answer)]
+
+        # same name and a higher total, but the race only adds up if they started over: a rejoin that immediately has a higher score after rejoining compared to before DC'ing
+        if complete and not names_changed and not back and not drops and self._race_ok(base) is None:
+            fits = [(pl, p) for pl, p, fresh in fixed
+                    if not fresh and self._could_start_over(p, self._race_ok(base + pl["total"]))]
+            if len(fits) == 1:
+                drops.append(fits[0])
+                decided = [d for d in decided if d[0] is not fits[0][0]]
+
+        for pl, p in drops:
+            team = self._tag(pl["team"])
+            why = (f"{p['name']} went from {pl['total']} to {p['total_score']}, looks like a DC? "
+                   if p["total_score"] < pl["total"] else
+                   f"The points only add up if {p['name']} DC'd and rejoined. ")
+            self._suggest(f"pts:{pl['id']}", "rejoin", why + f"They seem to be missing {pl['total']} points",
+                          f"Bank {pl['total']} for {team}", [{"place": pl["id"], "points": pl["total"]}])
+        steady = []
+        for pl, p, fresh in decided:
+            pk = player_key(p["name"])
+            origin = own[pl["id"]]
+            team = self._tag(pl["team"])
+            if fresh:
+                if origin:
+                    had = f"their {_points(pl['total'])} from before" if pl["away"] or pl["name"] == p["name"] \
+                        else f"the {_points(pl['total'])} {pl['name']} had for them"
+                    notes.append(f"{p['name']} is back")
+                    pl["stand_in"] = False
+                else:
+                    notes.append(f"{p['name']} took {pl['name']}'s place. {_points(pl['total'])} stay with {team}")
+                    pl["stand_in"] = True
+                pl["carried"] += pl["total"]
+            elif origin and pl["stand_in"]:
+                pl["stand_in"] = False            # kept their points: the "stand-in" was them, misread
+            elif pk not in pl["aliases"] and not self._is_origin(pl, pk) and not pl["stand_in"]:
+                pl["aliases"].append(pk)          # the player's own names only, a stand-in that stays is no rejoin
+            steady.append((pl, gain(pl, p, fresh)))
+        self._eleven_players(steady, [pl for pl in gone if pl["away"]] if tidy_board else [])
+        return notes, skip
+
+    @staticmethod
+    def _is_origin(pl, pk):
+        """`pk` looks like the player first seen in this place"""
+        return pk in pl["aliases"] or any(_alike(pk, a) >= NAME_MATCH for a in pl["aliases"])
+
+    def _race_ok(self, points):
+        per = POINTS_PER_RACE[self.lobby]
+        for k in range(1, TOTAL_RACES + 1):
+            if points == per * k or (self.lobby == 12 and points == per * k - (per - sum(TABLE_11P))):
+                return k
+        return None
+
+    @staticmethod
+    def _could_start_over(p, races):
+        return races is not None and p["total_score"] <= 15 * races
+
+    def _adds_up(self, base, unsure):
+        """For each unsure place: did someone start over? The answer that makes the fewest races add up, if
+        there is exactly one"""
+        if not unsure or len(unsure) > 6:
+            return None
+        fits = []
+        for answer in itertools.product((False, True), repeat=len(unsure)):
+            points = base + sum(p["total_score"] - (0 if fresh else pl["total"])
+                                for (pl, p), fresh in zip(unsure, answer))
+            k = self._race_ok(points)
+            if k is not None and all(self._could_start_over(p, k) for (pl, p), fresh in zip(unsure, answer) if fresh):
+                fits.append((k, answer))
+        if not fits:
+            return None
+        fewest = min(k for k, _ in fits)
+        best = [answer for k, answer in fits if k == fewest]
+        return list(best[0]) if len(best) == 1 else None
+
+    def _eleven_players(self, steady, away):
+        if self.lobby != 12:
+            return
+        scored = sorted((g for _, g in steady if g > 0), reverse=True)
+        idle = [pl for pl, g in steady if g == 0] + away
+        if scored != TABLE_11P or len(idle) != 1:
+            return
+        first = next(pl for pl, g in steady if g == 12)
+        second = next(pl for pl, g in steady if g == 10)
+        adds = [{"place": pl["id"], "points": 3 if pl is first else 2 if pl is second else 1}
+                for pl, g in steady if g > 0]
+        adds.append({"place": idle[0]["id"], "points": 1})
+        self._suggest("comp11", "comp11",
+                      f"Looks like an 11 player race. The usual correction is +3 for 1st ({first['name']}), "
+                      f"+2 for 2nd ({second['name']}), +1 for everyone else and +1 for {idle[0]['name']}, "
+                      "who missed this race", "Add 15 points", adds)
+
+    def _vote_teams(self, pairs):
+        """Each place votes for the team its group belongs to (stand-ins don't vote)"""
+        groups, labels = collections.defaultdict(list), {}
+        for pl, p in pairs:
+            tag = p.get("team_identifier") or "NoTag"
+            key = team_key(tag)
+            groups[key].append(pl)
+            if len(tag) > len(labels.get(key, "")):
+                labels[key] = tag
+        scores = []
+        for g, pls in groups.items():
+            known = collections.Counter(pl["team"] for pl in pls if pl["team"] and not pl["stand_in"])
+            scores += [(n, g, t) for t, n in known.items()]
+        mapping, taken = {}, set()
+        for n, g, t in sorted(scores, key=lambda x: (-x[0], x[1], x[2])):
+            if g not in mapping and t not in taken:
+                mapping[g] = t
+                taken.add(t)
+        existing = {pl["team"] for pl in self.places if pl["team"]}
+        for g in groups:
+            if g not in mapping:
+                t, n = g, 2
+                while t in taken or (t in existing and t != g):
+                    t, n = f"{g}{n}", n + 1
+                mapping[g] = t
+                taken.add(t)
+        for g, pls in groups.items():
+            t = mapping[g]
+            if t not in self.display or len(labels[g]) > len(self.display[t]):
+                self.display[t] = labels[g]
+            for pl in pls:
+                if pl["stand_in"]:
+                    pl["team"] = pl["team"] or t
+                    continue
+                pl["votes"][t] = pl["votes"].get(t, 0) + 1
+                had = pl["team"]
+                pl["team"] = max(pl["votes"], key=lambda k: (pl["votes"][k], k == had, k == t))
+
+    def _regroup(self):
+        """New format, recreate teams"""
+        if not self.last_players:
+            return
+        players = [{"full_name": p["name"], "white_score": p["total"], "green_score": 0} for p in self.last_players]
+        grouped = self._group(players)
+        old_team = {pl["id"]: pl["team"] for pl in self.places}
+        for pl in self.places:
+            pl["votes"], pl["team"] = {}, None
+        self.display = {k: v for k, v in self.display.items() if k in self.bank}
+        pairs, _, _ = self._match(grouped)
+        stand_ins = [pl for pl, _ in pairs if pl["stand_in"]]
+        for pl in stand_ins:
+            pl["stand_in"] = False
+        self._vote_teams(pairs)
+        for pl in stand_ins:
+            pl["stand_in"] = True
+        for pl in self.places:
+            if pl["team"] is None:
+                mates = collections.Counter(o["team"] for o in self.places
+                                            if o["team"] and old_team[o["id"]] == old_team[pl["id"]])
+                pl["team"] = mates.most_common(1)[0][0] if mates else old_team[pl["id"]]
 
     def same_board(self, players):
+        """True if `players` is last captured board"""
         if not self.last_players:
             return False
         new = sorted(p["white_score"] + p["green_score"] for p in players)
         return new == sorted(p["total"] for p in self.last_players)
 
-    # DCs
+    # suggestions and notes
     def _suggest(self, sid, kind, text, button, adds):
         self.suggestions = [s for s in self.suggestions if s["id"] != sid]
         self.suggestions.append({"id": sid, "kind": kind, "text": text, "button": button, "adds": adds})
@@ -175,96 +546,19 @@ class Session:
     def _tag(self, key):
         return self.display.get(key, key)
 
-    def _notice(self, new, live_before, tidy_board):
-        on_board_before = {p["pk"] for p in self.roster}
-        prev = self.roster + [p for pk, p in self.absent.items() if pk not in on_board_before]
-        if not prev:
-            return
-
-        def by_pk(players):
-            d = collections.defaultdict(list)
-            for p in players:
-                d[p["pk"]].append(p)
-            return d
-
-        prev_by, new_by = by_pk(prev), by_pk(new)
-        twins = {pk for pk, ps in list(prev_by.items()) + list(new_by.items()) if len(ps) > 1}
-        pairs = [(prev_by[pk][0], new_by[pk][0]) for pk in prev_by if pk in new_by and pk not in twins]
-        lost = [prev_by[pk][0] for pk in prev_by if pk not in new_by and pk not in twins]
-        fresh = [new_by[pk][0] for pk in new_by if pk not in prev_by and pk not in twins]
-        alike = sorted(((difflib.SequenceMatcher(None, a["pk"], b["pk"]).ratio(), i, j)
-                        for i, a in enumerate(lost) for j, b in enumerate(fresh)), reverse=True)
-        used_i, used_j = set(), set()
-        for ratio, i, j in alike:
-            if ratio < NAME_MATCH:
-                break
-            if i not in used_i and j not in used_j:
-                used_i.add(i), used_j.add(j)
-                pairs.append((lost[i], fresh[j]))
-        lost = [p for i, p in enumerate(lost) if i not in used_i]
-        fresh = [p for j, p in enumerate(fresh) if j not in used_j]
-
-        drops = [(a, b) for a, b in pairs if b["total"] < a["total"] and not a.get("banked")]
-        if len(drops) >= max(3, math.ceil(len(pairs) / 2)):
-            adds = [{"key": k, "points": pts} for k, pts in live_before.items() if pts]
-            self._suggest("room", "room", "Most totals went back down, looks like reopen? "
-                          f"The old room's {sum(live_before.values())} points are not banked yet",
-                          "Bank old room", adds)
-            drops = []
-        for a, b in drops:
-            self._suggest(f"pts:{b['pk']}", "rejoin",
-                          f"{b['name']} went from {a['total']} to {b['total']}, looks like a DC?"
-                          f"They seem to be missing {a['total']} points",
-                          f"Bank {a['total']} for {self._tag(b['key'])}",
-                          [{"name": b["name"], "key": b["key"], "points": a["total"]}])
-
-        gone_now = [p for p in lost if p["pk"] in on_board_before]
-        left_room = (self.lobby == 12 and tidy_board and len(new) < 12 and not fresh and not twins and gone_now)
-        if left_room:
-            for p in gone_now:
-                self._suggest(f"pts:{p['pk']}", "left",
-                              f"{p['name']} is no longer on the board and had {p['total']} points.",
-                              f"Bank {p['total']} for {self._tag(p['key'])}",
-                              [{"name": p["name"], "key": p["key"], "points": p["total"]}])
-
-        if self.lobby == 12 and not twins and not fresh and not drops:
-            gains = [(b, b["total"] - a["total"]) for a, b in pairs if b["total"] >= a["total"]]
-            scored = sorted((g for _, g in gains if g > 0), reverse=True)
-            idle = [b for b, g in gains if g == 0] + lost
-            if scored == TABLE_11P and len(idle) == 1:
-                first = next(b for b, g in gains if g == 12)
-                second = next(b for b, g in gains if g == 10)
-                adds = [{"name": b["name"], "key": b["key"], "points": 3 if b is first else 2 if b is second else 1}
-                        for b, g in gains if g > 0]
-                adds.append({"name": idle[0]["name"], "key": idle[0]["key"], "points": 1})
-                self._suggest("comp11", "comp11",
-                              f"Looks like an 11 player race. The usual correction is "
-                              f"+3 for 1st ({first['name']}), +2 for 2nd ({second['name']}) and +1 for everyone else.",
-                              "Add 15 points", adds)
-
-        self.absent = {p["pk"]: p for p in lost}
-
-    def _team_of(self, add):
-        if add.get("name"):
-            pk = player_key(add["name"])
-            for key, members in self.members.items():
-                if any(player_key(m["name"]) == pk for m in members):
-                    return key
-        return add["key"]
-
     def apply_suggestion(self, sid):
         s = next((s for s in self.suggestions if s["id"] == sid), None)
-        if not s:
+        if not s or not s["button"]:
             return None
         self._push_undo(s["button"][0].lower() + s["button"][1:])
+        places = {pl["id"]: pl for pl in self.places}
         for add in s["adds"]:
-            key = self._team_of(add)
-            self.bank[key] = self.bank.get(key, 0) + add["points"]
-            self.display.setdefault(key, key)
-        if s["kind"] in ("left", "rejoin"):
-            pk = s["id"].split(":", 1)[1]
-            if pk in self.absent:
-                self.absent[pk]["banked"] = True
+            if "place" in add and add["place"] in places:
+                places[add["place"]]["carried"] += add["points"]
+            else:
+                key = add["key"]
+                self.bank[key] = self.bank.get(key, 0) + add["points"]
+                self.display.setdefault(key, key)
         self.suggestions = [x for x in self.suggestions if x["id"] != sid]
         return s
 
@@ -273,12 +567,13 @@ class Session:
 
     # bank
     def bank_all(self):
-        if not any(self.live.values()):
+        live = self.live
+        if not any(live.values()):
             return False
         self._push_undo("bank all")
-        for key, pts in self.live.items():
+        for key, pts in live.items():
             self.bank[key] = self.bank.get(key, 0) + pts
-        self.live, self.members, self.last_players, self.roster, self.absent = {}, {}, [], [], {}
+        self.places, self.last_players = [], []
         self.suggestions = [s for s in self.suggestions if s["kind"] != "room"]
         return True
 
@@ -289,11 +584,18 @@ class Session:
         keys = self.keys()
         if typed in keys:
             return "ok", typed
+        custom = self._custom_match(typed, keys)
+        if custom:
+            return "ok", custom
         starts = sorted(k for k in keys if k.startswith(typed))
         if len(starts) == 1:
             return "ok", starts[0]
-        if starts:
-            return "ambiguous", [self._tag(k) for k in starts]
+        # the tag as shown can be longer than the team's first reading
+        shown = sorted(k for k in keys if team_key(self._tag(k)).startswith(typed))
+        if len(shown) == 1:
+            return "ok", shown[0]
+        if starts or shown:
+            return "ambiguous", [self._tag(k) for k in (starts or shown)]
         return "unknown", None
 
     def adjust(self, tag_text, points, create=False):
@@ -317,6 +619,7 @@ class Session:
 
     # output
     def standings(self, my_tag=""):
+        live, members = self.live, self.members
         totals = {k: t for k, t in self._totals().items() if t != 0}
         ranks = self._ranks(totals)
         mine = self.resolve_tag(my_tag)[1] if my_tag else None
@@ -330,21 +633,21 @@ class Session:
                 "tag": self._tag(key),
                 "rank": ranks[key],
                 "total": totals[key],
-                "live": self.live.get(key, 0),
+                "live": live.get(key, 0),
                 "bank": self.bank.get(key, 0),
                 "gain": None if before is None else totals[key] - before,
                 "trend": None if was is None else "up" if ranks[key] < was else "down" if ranks[key] > was else "same",
                 "gap": None if above is None else above - totals[key],
-                "members": self.members.get(key, []),
+                "members": members.get(key, []),
                 "mine": key == mine,
             })
             above = totals[key]
-        first_chars = collections.Counter(r["key"][0] for r in rows)
+        first_chars = collections.Counter(label_of(r["tag"])[0] for r in rows)
         for r in rows:
             full = label_of(r["tag"])
             numbered = bool(re.fullmatch(r"\D{1,3}\d+", full))
-            r["short"] = full if first_chars[r["key"][0]] > 1 or numbered else full[0]
-        return rows
+            r["short"] = full if first_chars[full[0]] > 1 or numbered else full[0]
+        return self._with_custom(rows)
 
     def clipboard_text(self, my_tag="", mark_mine=True):
         """`A 120 | B 98 | @7`"""

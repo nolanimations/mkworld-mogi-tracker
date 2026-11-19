@@ -74,7 +74,7 @@ html, body { margin: 0; background: transparent; overflow: hidden; }
 /* list version */
 .list { display: inline-flex; flex-direction: column; gap: 6px; }
 .list .cell {
-  position: relative; display: grid; grid-template-columns: 38px minmax(34px, auto) minmax(58px, auto); column-gap: 6px;
+  position: relative; display: grid; grid-template-columns: 38px minmax(34px, auto) minmax(58px, auto); column-gap: 12px;
   align-items: center; height: 46px; padding: 0 50px 0 8px; border-radius: 999px;
   background: var(--pill); box-shadow: inset 0 0 0 2px var(--edge);
 }
@@ -86,7 +86,7 @@ html, body { margin: 0; background: transparent; overflow: hidden; }
 .list .rank.r1 { color: #ffe14a; }
 .list .rank.r2 { color: #cfe7ff; }
 .list .rank.r3 { color: #ffb37a; }
-.list .tag { font-size: 26px; color: #fff; padding: 3px 4px 3px 2px; }
+.list .tag { font-size: 26px; color: #fff; padding: 3px 4px 3px 2px; max-width: 150px; overflow: hidden; }  /* custom tags */
 .list .score { font-size: 28px; color: #fff; text-align: right; }
 .list .seam {
   position: absolute; right: 4px; top: -3px; transform: translateY(-50%); z-index: 2; min-width: 40px; text-align: center;

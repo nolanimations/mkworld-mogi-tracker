@@ -19,6 +19,7 @@ Windows may show a "Windows protected your PC" notice the first time, because th
 
 ## How to use
 
+Mario Kart World HAS to be 16:9 fullscreen for this tracker to work at all!
 1. Pick the room size (**24** or **12**) and the team **format** at the top
 2. Open settings (the cog) and choose the capture source:
    - **Screen** takes a screenshot, and the game has to be fullscreen
@@ -29,6 +30,8 @@ Windows may show a "Windows protected your PC" notice the first time, because th
    - **12p:** capture once the scoreboard finishes adding points like usual
 4. Also has a text output that you can share: `A 124 | B 73 | C 67 | @8`
 
+> IMPORTANT: Make sure that you either set your OBS Virtual Camera source directly to your capture card, or that there's no stream overlay stuff covering the scoreboard!
+
 ### Auto-capture
 
 Enable **Auto-capture** in settings and the app reads the scoreboard by itself after every race.
@@ -36,6 +39,10 @@ Enable **Auto-capture** in settings and the app reads the scoreboard by itself a
 
 - Give the game time to properly show results. If you start spamming A it usually still works, but if the
   results are gone before the tracker can see them, it tells you
+- Auto-capture is likely to miss a race every now and then, so keep taking screenshots of the results
+  (or make a clip in 24p)
+- Also works in team mode if you really want it to
+- Auto-capture very very slow. A 24p race can take over 25 seconds to process
 
 ### Adding points by hand
 
@@ -45,16 +52,18 @@ Type a tag and a number in **Add points** or click a team to fill in its tag. Ne
 
 ### DCs
 
-The tracker does its best to handle all the 12p DC quirks in this game:
+The tracker keeps track of every spot in the room, so it should be able to handle all the 12p DC quirks:
 
 | Cause | Effect |
 | --- | --- |
-| A bot raced for the player | Nothing |
-| A player rejoins with 0 | App offers to bank the points they had before |
-| A player left a 12p room | App offers to bank their points |
-| 11p race | App offers to add the usual correction: +3 for 1st, +2 for 2nd, +1 for everyone else |
+| A player left the room | Their points keep counting for their team |
+| A bot raced in their place | The bot's points go to that player's team |
+| The player rejoins with 0 | What they (and the bot) had stays with their team |
+| 11p race | App offers to add the usual correction: +3 for 1st, +2 for 2nd, +1 for everyone else and the player who missed it |
 
-The last one needs a capture of the race before as well! Add points by hand if you're unsure
+A small note tells you when the tracker did one of these by itself. All of this does need you to have captured the races around the DC,
+if one was missed and a total suddenly dropped, the app offers to bank the missing points instead. Just add points by hand if
+you're unsure!
 
 ### My tag
 
@@ -62,6 +71,11 @@ Ported from my [old 8DX table bot fork](https://github.com/nolanimations/8DX-Wor
 
 Enter your team's tag in the settings, and it will turn gold in the app and on the overlay. Your tag can be wrapped
 in `**` in the copied text if you enable it in settings
+
+### Custom tags
+
+Hover a team and click the pencil to give it your own tag, like `AB` instead of `A` (up to 10 characters). It's purely visual,
+it only changes the tag in the app, the OBS overlay and text output. Empty the box to go back. **New mogi** clears all custom tags
 
 ## OBS overlay
 
@@ -84,6 +98,7 @@ You can also fix the layout or the size in the address: `…/overlay?layout=list
 - Very small marks in a name, like an apostrophe, can be missed. This does not affect scores
 - Settings, log and the last capture are stored in `%APPDATA%\MKWorld Mogi Tracker`
 - The text recognition model is ran on CPU
+- The tracker has auto-update
 
 ## Found a bug?
 

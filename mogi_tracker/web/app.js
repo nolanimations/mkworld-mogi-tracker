@@ -8,6 +8,11 @@
   let lastMessageId = -1;
   let fadeTimer = null;
   let pendingCreate = null;     // {tag, points} waiting for "create this team?"
+  let laterUpdate = null;
+  let captureHover = false;
+  let editingTag = null;        // key of the team whose tag is being edited (the board waits with redrawing)
+  const TAG_MAX = 10;           // session.CUSTOM_TAG_MAX
+  const PENCIL = '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M3 17.25V21h3.75L17.8 9.94l-3.75-3.75L3 17.25zm17.7-10.2a1 1 0 0 0 0-1.42l-2.33-2.33a1 1 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';   // the version the user said "Later" to
 
   const KEY_NAMES = { down: "↓", up: "↑", left: "←", right: "→", space: "Space", enter: "Enter" };
   const prettyKey = (combo) => combo.split("+").map((k) => KEY_NAMES[k] || k).join(" + ");
@@ -72,6 +77,19 @@
   // notices
   function drawNotices() {
     const items = [];
+    const up = state.update;
+    if (up && laterUpdate !== up.version) {
+      const n = el("div", "notice note");
+      n.append(el("p", "", `Version ${up.version} is out (you have ${state.version})`));
+      const go = el("button", "pill-btn gold", up.updating ? "Updating..." : up.auto ? "Update" : "Download");
+      go.disabled = up.updating;
+      go.addEventListener("click", () => post("update"));
+      const later = el("button", "pill-btn ghost", "Later");
+      later.hidden = up.updating;
+      later.addEventListener("click", () => { laterUpdate = up.version; drawNotices(); });
+      n.append(go, later);
+      items.push(n);
+    }
     if (pendingCreate) {
       const n = el("div", "notice");
       n.append(el("p", "", `No team with the tag “${pendingCreate.tag}” yet. Create it with ${pendingCreate.points > 0 ? "+" : ""}${pendingCreate.points} points?`));
@@ -96,13 +114,17 @@
       items.push(n);
     }
     for (const s of state.suggestions) {
-      const n = el("div", "notice");
+      const n = el("div", "notice" + (s.button ? "" : " note"));
       n.append(el("p", "", s.text));
-      const yes = el("button", "pill-btn gold", s.button);
-      yes.addEventListener("click", () => post("suggestion", { id: s.id, apply: true }));
-      const no = el("button", "pill-btn ghost", "Dismiss");
+      if (s.button) {
+        const yes = el("button", "pill-btn gold", s.button);
+        yes.addEventListener("click", () => post("suggestion", { id: s.id, apply: true }));
+        n.append(yes);
+      }
+      // a note says what the app already did by itself, there is nothing to apply
+      const no = el("button", "pill-btn ghost", s.button ? "Dismiss" : "OK");
       no.addEventListener("click", () => post("suggestion", { id: s.id, apply: false }));
-      n.append(yes, no);
+      n.append(no);
       items.push(n);
     }
     $("notices").replaceChildren(...items);
@@ -117,6 +139,7 @@
 
   function drawBoard() {
     const board = $("board");
+    if (editingTag && state.teams.some((t) => t.key === editingTag)) return;   // redrawn when the edit ends
     const before = new Map([...board.querySelectorAll(".row")].map((r) => [r.dataset.key, r.getBoundingClientRect().top]));
     if (!state.teams.some((t) => t.key === selectedKey)) selectedKey = null;
     board.classList.toggle("dense", state.teams.length > 8);
@@ -140,7 +163,16 @@
       const trend = el("span", "trend");
       if (t.trend) trend.innerHTML = TREND[t.trend];   // markup fix
       const who = el("div", "who");
-      who.append(el("span", "tag", t.tag));
+      const tag = el("span", "tag", t.tag);
+      if (t.custom) tag.title = `Read as ${t.read}`;
+      const pen = el("button", "tag-pen");
+      pen.type = "button";
+      pen.title = "Edit tag";
+      pen.innerHTML = PENCIL;
+      pen.addEventListener("click", (e) => { e.stopPropagation(); editTag(t, tag, pen); });
+      const line = el("div", "tag-line");
+      line.append(tag, pen);
+      who.append(line);
       const members = el("span", "members");
       if (t.bank) members.append(el("span", "bank-chip", `bank ${t.bank > 0 ? "+" : ""}${t.bank}`));
       members.append(t.members.map((m) => m.name).join(", "));
@@ -169,6 +201,38 @@
     }
   }
 
+  // Custom tags are only cosmetic. Saving any text makes it the team's tag, also the read tag typed again (that one
+  // is often shown shortened, "V" for "V$"); only an empty box goes back to the read tag
+  function editTag(t, tag, pen) {
+    editingTag = t.key;
+    const input = el("input", "input tag-input");
+    input.type = "text";
+    input.maxLength = TAG_MAX;
+    input.spellcheck = false;
+    input.value = t.tag;
+    input.setAttribute("aria-label", `Tag for ${t.tag}`);
+    tag.replaceWith(input);
+    pen.hidden = true;
+    input.focus();
+    input.select();
+    let typed = false, done = false;
+    const finish = (save) => {
+      if (done) return;
+      done = true;
+      editingTag = null;
+      if (save) post("custom_tag", { key: t.key, tag: input.value });
+      else drawBoard();
+    };
+    input.addEventListener("input", () => { typed = true; });
+    input.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Enter") finish(true);
+      else if (e.key === "Escape") finish(false);
+    });
+    input.addEventListener("blur", () => finish(typed));   // clicking away keeps what was typed, an untouched box changes nothing
+    input.addEventListener("click", (e) => e.stopPropagation());
+  }
+
   function selectTeam(team) {
     selectedKey = team ? team.key : null;
     for (const row of document.querySelectorAll(".row")) row.classList.toggle("selected", row.dataset.key === selectedKey);
@@ -186,9 +250,11 @@
 
   // dock
   function drawDock() {
-    const busy = state.busy;
-    $("btn-capture").disabled = busy;
-    $("capture-label").textContent = busy ? "READING" : "CAPTURE";
+    const busy = state.busy, btn = $("btn-capture");
+    btn.classList.toggle("reading", busy);       // while reading, a click cancels
+    btn.disabled = state.cancelling;
+    btn.title = busy && !state.cancelling ? "Cancel this capture" : "";
+    $("capture-label").textContent = state.cancelling ? "STOPPING" : busy ? (captureHover ? "CANCEL?" : "READING") : "CAPTURE";
     const cap = $("capture-key");
     cap.hidden = busy || !state.hotkey.combo;
     cap.textContent = prettyKey(state.hotkey.combo);
@@ -280,7 +346,10 @@
     .map((f) => document.fonts.load(f, "A1★"))).catch(() => {});
 
   // wiring
-  $("btn-capture").addEventListener("click", () => post("capture"));
+  $("btn-capture").addEventListener("click", () => post(state.busy ? "cancel" : "capture"));
+  for (const [type, on] of [["mouseenter", true], ["mouseleave", false]]) {
+    $("btn-capture").addEventListener(type, () => { captureHover = on; if (state) drawDock(); });
+  }
   $("btn-copy").addEventListener("click", async () => {
     const out = await post("copy");
     if (!out.ok) return;

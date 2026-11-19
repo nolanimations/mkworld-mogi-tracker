@@ -27,13 +27,16 @@ def upper_latin(s: str) -> str:
     return "".join(c.upper() if c.isascii() or "LATIN" in unicodedata.name(c, "") else c for c in s)
 
 
+LOOKALIKES = str.maketrans({"l": "I", "0": "O"})   # the best way I could keep these apart
+
+
 def get_first_char_key(name: str) -> str:
     if not name:
         return "?"
     s = str(name).strip()
     if not s:
         return "?"
-    return upper_latin(s[0])
+    return upper_latin(s[0].translate(LOOKALIKES))
 
 
 def extract_tokens(name: str) -> list[str]:
@@ -200,7 +203,11 @@ def team_label_for_group(players, fallback_key: str) -> str:
     lead_tokens = [extract_leading_token(n) for n in names]
     lead_tokens = [t for t in lead_tokens if t]
 
-    # Prefer if members share a suffix tag
+    prefix = shared_prefix_label(names)
+    if prefix:
+        return prefix
+
+    # Tags at the end of names are rare
     if len(lead_tokens) >= 2:
         suffix_counter = collections.Counter()
         for token in lead_tokens:
@@ -215,10 +222,6 @@ def team_label_for_group(players, fallback_key: str) -> str:
             )
             if best_count >= 2 and len(best_suffix) >= 3:
                 return best_suffix
-
-    prefix = shared_prefix_label(names)
-    if prefix:
-        return prefix
 
     if lead_tokens:
         top_token = min(collections.Counter(lead_tokens).items(), key=lambda kv: (-kv[1], kv[0]))[0]
@@ -275,6 +278,30 @@ def should_run_refinement(grouping, expected_teams: int, team_size: int) -> bool
 def name_affinity(player, members) -> float:
     name = str(player.get("full_name", ""))
     return max((similarity_score(name, str(m.get("full_name", ""))) for m in members), default=0.0)
+
+
+def rebalance(grouping, team_size: int):
+    """The right number of teams, but one too big and one too small: during testing someone reported that a misread first letter put a player with the
+    wrong team (a capital I read as l joined the L team). This moves the player whose name fits a short team better than
+    their own, if applicable"""
+    groups = {k: list(v) for k, v in grouping.items()}
+    for _ in range(len(groups)):
+        big = [k for k, v in groups.items() if len(v) > team_size]
+        short = [k for k, v in groups.items() if len(v) < team_size]
+        best = None
+        for b in big:
+            for player in groups[b]:
+                own = name_affinity(player, [m for m in groups[b] if m is not player])
+                for s in short:
+                    gain = name_affinity(player, groups[s]) - own
+                    if gain > 0 and (best is None or gain > best[0]):
+                        best = (gain, player, b, s)
+        if best is None:
+            break
+        _, player, b, s = best
+        groups[b].remove(player)
+        groups[s].append(player)
+    return groups
 
 
 def merge_to_expected(grouping, expected_teams: int, team_size: int):
@@ -401,6 +428,8 @@ def group_teams_first_char_primary(raw_data, team_format="4v4", lobby_size=24):
     players = build_players(raw_data)
 
     first_char_groups = bucket_by(players, lambda p: get_first_char_key(p.get("full_name")))
+    if len(first_char_groups) == expected_teams:
+        first_char_groups = rebalance(first_char_groups, team_size)
     base_score = score_grouping(first_char_groups, expected_teams, team_size)
     started_at_expected_count = len(first_char_groups) == expected_teams
     refinement_needed = should_run_refinement(first_char_groups, expected_teams, team_size)

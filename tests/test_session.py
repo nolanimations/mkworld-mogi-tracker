@@ -147,9 +147,9 @@ def test_rejoin_at_zero_is_offered_once(s):
     lost = t1["A two"]
     t2["A two"] = 12          # came back at 0 and finished 2nd
     s.apply_capture(board(t2))
-    assert [x["id"] for x in s.suggestions] == ["pts:atwo"]
+    assert [x["kind"] for x in s.suggestions] == ["rejoin"]
     assert f"Bank {lost} for A" == s.suggestions[0]["button"]
-    s.apply_suggestion("pts:atwo")
+    s.apply_suggestion(s.suggestions[0]["id"])
     assert totals_by_tag(s)["A"] == before + 15 + 12
     assert s.suggestions == []
     assert s.race_info()["delta"] == 0
@@ -165,9 +165,9 @@ def test_suggestion_can_be_dismissed_and_undone(s):
     s.apply_capture(board(t2))
     sid = s.suggestions[0]["id"]
     s.apply_suggestion(sid)
-    assert s.bank["B"] == 10
+    assert totals_by_tag(s)["B"] == 10 + 1 + 9
     s.undo()
-    assert s.bank == {} and [x["id"] for x in s.suggestions] == [sid]
+    assert totals_by_tag(s)["B"] == 1 + 9 and [x["id"] for x in s.suggestions] == [sid]
     s.dismiss_suggestion(sid)
     assert s.suggestions == []
 
@@ -198,15 +198,16 @@ def test_eleven_player_race_offers_the_correction(s, keep_row):
     t1 = race({}, names_12p())
     s.apply_capture(board(t1))
     t2, present = eleven_player_race(t1, "C two", keep_row)
+    before = totals_by_tag(s)
     s.apply_capture(board(t2), tidy_board=True)
-    ids = [x["id"] for x in s.suggestions]
-    assert "comp11" in ids
-    assert ("pts:ctwo" in ids) == (not keep_row)
-    assert s.race_info()["delta"] != 0
-    for sid in ids:
-        s.apply_suggestion(sid)
+    kinds = [x["kind"] for x in s.suggestions]
+    assert "comp11" in kinds
+    assert ("note" in kinds) == (not keep_row)          # left the room: their points keep counting by themselves
+    assert s.race_info()["delta"] == -15
+    s.apply_suggestion("comp11")
     assert s.race_info() == {"number": 2, "of": 12, "left": 10, "grand": 164, "delta": 0}
-    assert s.bank["A"] == 5 and s.bank["C"] == (2 if keep_row else 2 + t1["C two"])
+    after = totals_by_tag(s)
+    assert after["A"] - before["A"] == 12 + 10 + 5 and after["C"] - before["C"] == 7 + 0 + 2
 
 
 def test_second_eleven_player_race_in_a_row(s):
@@ -320,3 +321,176 @@ def test_greek_tags_keep_their_own_letter():
                     [{"full_name": f"{t} {k}", "white_score": 5, "green_score": 0} for t in "ABCD" for k in range(4)])
     tags = {t["tag"] for t in s.standings()}
     assert "μ" in tags and "M" in tags
+
+
+# real 6v6 test
+RACE10 = {"V$ pqzt": 93, "AX★Morven": 88, "AX": 85, "AX★4Taks": 78, "AX Dunn": 78, "V$ rolo": 75, "SX kai_pip": 75,
+          "V$ fenx'": 59, "V$ Tirane": 55, "V$ Paz": 53, "V$ Rowlan": 47, "SX☆XORBEAS": 34}
+RACE11 = {"AX★Morven": 97, "V$ pqzt": 94, "AX": 89, "AX Dunn": 88, "V$ rolo": 87, "AX★4Taks": 84, "SX kai_pip": 78,
+          "V$ Paz": 58, "V$ Tirane": 57, "V$ Rowlan": 54, "SX☆XORBEAS": 42}
+
+
+def _board(totals):
+    return [{"full_name": n, "white_score": t, "green_score": 0} for n, t in totals.items()]
+
+
+def test_11_player_race_is_spotted_even_with_a_misread_name():
+    s = Session(12, "6v6")
+    s.apply_capture(_board(RACE10))
+    misread = {("VSPa2" if n == "V$ Paz" else "SX☆ORBES" if n == "SX☆XORBEAS" else n): t for n, t in RACE11.items()}
+    s.apply_capture(_board(misread))
+    kinds = {x["kind"] for x in s.suggestions}
+    assert kinds == {"note", "comp11"}
+    comp = next(x for x in s.suggestions if x["kind"] == "comp11")
+    assert sum(a["points"] for a in comp["adds"]) == 15
+    assert "fenx" in next(x for x in s.suggestions if x["kind"] == "note")["text"]
+
+RACE12 = {"AX★Morven": 104, "AX": 104, "V$ pqzt": 102, "AX Dunn": 98, "V$ rolo": 90, "AX★4Taks": 89, "SX kai_pip": 84,
+          "V$ Paz": 70, "V$ Tirane": 59, "V$ Rowlan": 55, "SX☆XORBEAS": 46, "V$ fenx'": 9}
+
+
+def test_real_11_player_race_and_rejoin_add_up_per_team():
+    """fenx leaves with 59, race 11 has 11 players, fenx is back at 0 and scores 9. Red must end on 532,
+    blue on 452"""
+    s = Session(12, "6v6")
+    s.apply_capture(_board(RACE10))
+    misread = {("VSPa2" if n == "V$ Paz" else "SX☆ORBES" if n == "SX☆XORBEAS" else "pqzt" if n == "V$ pqzt" else n): t
+               for n, t in RACE11.items()}
+    s.apply_capture(_board(misread))
+    assert s.race_info()["delta"] == -15
+    s.apply_suggestion("comp11")
+    assert s.race_info() == {"number": 11, "of": 12, "left": 1, "grand": 902, "delta": 0}
+    team_of = {m["name"]: r["total"] for r in s.standings() for m in r["members"]}
+    assert team_of["SX☆ORBES"] == 485 and team_of["V$ rolo"] == 417
+    s.apply_capture(_board(RACE12))
+    assert [x["kind"] for x in s.suggestions] == ["note"]
+    assert s.race_info() == {"number": 12, "of": 12, "left": 0, "grand": 984, "delta": 0}
+    by_member = {m["name"]: r["total"] for r in s.standings() for m in r["members"]}
+    assert by_member["V$ fenx'"] == 452 and by_member["AX★Morven"] == 532
+    assert len(s.standings()) == 2
+
+
+def test_bot_points_go_to_the_player_it_stood_in_for(s):
+    """race 1 normal, race 2: B two (9 points) DCs and the bot Swoop scores 2, race 3: B two is back at 0 and
+    finishes 5th (+8)"""
+    t1 = race({}, names_12p())
+    assert t1["B two"] == 9
+    s.apply_capture(board(t1))
+    racers = [n for n in names_12p() if n != "B two"]
+    order2 = racers[:10] + ["Swoop"] + racers[10:]
+    t2 = race({n: v for n, v in t1.items() if n != "B two"}, order2)
+    assert t2["Swoop"] == 2
+    s.apply_capture(board(t2))
+    assert s.race_info() == {"number": 2, "of": 12, "left": 10, "grand": 164, "delta": 0}
+    assert [x["kind"] for x in s.suggestions] == ["note"] and "Swoop" in s.suggestions[0]["text"]
+    order3 = racers[:4] + ["B two"] + racers[4:]
+    t3 = race({n: v for n, v in t2.items() if n != "Swoop"}, order3)
+    t3["B two"] = 8
+    s.apply_capture(board(t3))
+    assert s.race_info() == {"number": 3, "of": 12, "left": 9, "grand": 246, "delta": 0}
+    b = next(r for r in s.standings() if r["tag"] == "B")
+    assert {m["name"]: m["total"] for m in b["members"]}["B two"] == 9 + 2 + 8
+    assert b["total"] == t3["B one"] + 19
+    assert not any(x["button"] for x in s.suggestions)
+
+
+def test_missing_the_bot_race_still_works(s):
+    t1 = race({}, names_12p())
+    s.apply_capture(board(t1))
+    racers = [n for n in names_12p() if n != "B two"]
+    t2 = race({n: v for n, v in t1.items() if n != "B two"}, racers[:10] + ["Swoop"] + racers[10:])
+    t3 = race({n: v for n, v in t2.items() if n != "Swoop"}, racers[:4] + ["B two"] + racers[4:])
+    t3["B two"] = 8
+    s.apply_capture(board(t3))
+    assert [x["kind"] for x in s.suggestions] == ["rejoin"] and s.suggestions[0]["button"] == "Bank 9 for B"
+    s.apply_suggestion(s.suggestions[0]["id"])
+    assert s.race_info()["grand"] == 246 - 2 and s.race_info()["number"] == 3
+
+
+def test_skipping_several_races_is_just_a_bigger_step(s):
+    t = race({}, names_12p())
+    s.apply_capture(board(t))
+    for _ in range(3):
+        t = race(t, list(reversed(names_12p())))
+    s.apply_capture(board(t))
+    assert s.suggestions == [] and s.race_info() == {"number": 4, "of": 12, "left": 8, "grand": 328, "delta": 0}
+
+
+@pytest.mark.parametrize("back_with", [3, 12])
+def test_bot_that_kept_the_points_then_player_back_at_0(s, back_with):
+    """C one (8 points) DCs, bot Swoop keeps the points and finishes 12th, so it shows 9.
+    Next race C one is back at 0. The 9 must stay with C, also when C one scores more than 9 straight away"""
+    t1 = race({}, names_12p())
+    assert t1["C one"] == 8
+    s.apply_capture(board(t1))
+    others = [n for n in names_12p() if n != "C one"]
+    t2 = race({("Swoop" if n == "C one" else n): v for n, v in t1.items()}, others + ["Swoop"])
+    assert t2["Swoop"] == 9
+    s.apply_capture(board(t2))
+    assert s.race_info() == {"number": 2, "of": 12, "left": 10, "grand": 164, "delta": 0}
+    assert not any(x["button"] for x in s.suggestions)
+    order = {3: others[:9] + ["C one"] + others[9:], 12: others[:1] + ["C one"] + others[1:]}[back_with]
+    t3 = race({n: v for n, v in t2.items() if n != "Swoop"}, order)
+    t3["C one"] = back_with
+    s.apply_capture(board(t3))
+    assert s.race_info() == {"number": 3, "of": 12, "left": 9, "grand": 246, "delta": 0}
+    c = next(r for r in s.standings() if r["tag"] == "C")
+    assert {m["name"]: m["total"] for m in c["members"]}["C one"] == 9 + back_with
+    assert [x["kind"] for x in s.suggestions] == ["note"] and "C one is back" in s.suggestions[0]["text"]
+
+
+def test_bot_scoring_more_than_the_player_had(s):
+    t1 = race({}, names_12p())
+    assert t1["D two"] == 5
+    s.apply_capture(board(t1))
+    others = [n for n in names_12p() if n != "D two"]
+    t2 = race({n: v for n, v in t1.items() if n != "D two"}, others[:4] + ["Swoop"] + others[4:])
+    assert t2["Swoop"] == 8
+    s.apply_capture(board(t2))
+    assert s.race_info() == {"number": 2, "of": 12, "left": 10, "grand": 164, "delta": 0}
+    d = next(r for r in s.standings() if r["tag"] == "D")
+    assert {m["name"]: m["total"] for m in d["members"]}["Swoop"] == 5 + 8
+
+
+def test_rejoin_under_the_same_name_with_a_higher_score_is_offered(s):
+    t1 = race({}, names_12p())
+    s.apply_capture(board(t1))
+    others = [n for n in names_12p() if n != "A two"]
+    t2 = race({n: v for n, v in t1.items() if n != "A two"}, ["A two"] + others)
+    assert t2["A two"] == 15 and t1["A two"] == 12
+    s.apply_capture(board(t2))
+    assert [x["kind"] for x in s.suggestions] == ["rejoin"] and s.suggestions[0]["button"] == "Bank 12 for A"
+    s.apply_suggestion(s.suggestions[0]["id"])
+    assert s.race_info()["delta"] == 0 and s.race_info()["grand"] == 164
+
+
+def test_custom_tags_are_only_cosmetic(s):
+    t = race({}, names_12p())
+    s.apply_capture(board(t))
+    assert s.set_custom_tag("A", "  V$  ") and s.set_custom_tag("B", "TSS")
+    assert s.set_custom_tag("C", "C")             # the read tag typed again still counts as custom
+    rows = {r["key"]: r for r in s.standings()}
+    assert (rows["A"]["tag"], rows["A"]["short"], rows["A"]["read"], rows["A"]["custom"]) == ("V$", "V$", "A", True)
+    assert rows["C"]["custom"] and not rows["D"]["custom"]
+    assert s.clipboard_text().startswith("V$ 27 | TSS 19 | C 15 | D 11")
+    t = race(t, names_12p())
+    s.apply_capture(board(t))
+    assert {r["key"]: r["total"] for r in s.standings()}["A"] == 54
+    assert s.resolve_tag("v$") == ("ok", "A") and s.resolve_tag("TS") == ("ok", "B") and s.resolve_tag("A") == ("ok", "A")
+    assert s.adjust("TSS", 5)["ok"] and {r["key"]: r["total"] for r in s.standings()}["B"] == 43
+    assert not s.set_custom_tag("Z", "nope")
+
+
+def test_custom_tag_limit_reset_undo_and_new_mogi(s):
+    s.apply_capture(board(race({}, names_12p())))
+    s.set_custom_tag("A", "Nolanimations")
+    assert s.custom["A"] == "Nolanimati"       # Nintendo 10 character limit
+    s.set_custom_tag("A", "   ")
+    assert "A" not in s.custom
+    s.set_custom_tag("A", "V$")
+    assert s.undo_label() == "tag change"
+    s.undo()
+    assert "A" not in s.custom
+    s.set_custom_tag("A", "V$")
+    s.reset()
+    assert s.custom == {}

@@ -16,12 +16,14 @@ DEFAULTS = {
     "overlay_layout": "bar",
     "background": "dark",
     "port": 12424,
+    "scoring": "places",         # "classic": the old DC logic (session_classic.py), only set by hand in settings.json
 }
 OPTIONS = {
     "lobby": teams.LOBBY_SIZES,
     "source": ("monitor", "obs"),
     "overlay_layout": ("bar", "list"),
     "background": ("dark", "blue", "light"),
+    "scoring": ("places", "classic"),
 }
 
 _lock = threading.Lock()

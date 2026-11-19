@@ -48,7 +48,7 @@
   function shrinkTags() {
     const range = document.createRange();
     const scale = root.getBoundingClientRect().width / root.offsetWidth || 1;
-    for (const tag of root.querySelectorAll(".bar .tag")) {
+    for (const tag of root.querySelectorAll(".bar .tag, .list .tag")) {
       tag.style.fontSize = "";
       const style = getComputedStyle(tag);
       const room = tag.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);

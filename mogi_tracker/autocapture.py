@@ -154,6 +154,11 @@ class Watcher:
         if self._job:
             self._job.end()
 
+    def cancel(self):
+        job = self._job
+        if job:
+            job.end()
+
     # loop
     def _run(self):
         feed = capture.Feed(self.source, self.monitor)
@@ -233,6 +238,13 @@ class Watcher:
         threading.Thread(target=run, name="autocapture-read", daemon=True).start()
 
 
+def _row_unread(frame, rows):
+    read = {r["ti"] for r in rows}
+    tops = ocr.row_tops(frame, 12)
+    team = ocr.team_board(frame, tops)
+    return any(ocr.rank_at(frame, top, team) for k, top in enumerate(tops) if k not in read)
+
+
 def _one_row_per_rank(rows):
     seen, out = set(), []
     for r in sorted(rows, key=lambda r: r["top"]):
@@ -277,14 +289,17 @@ class _Read24:
                 and all(p["support"] >= 2 for p in merged))
 
     def run(self):
-        read, used, merged, warnings, stale = [], [], [], [], 0
+        read, used, merged, warnings, stale, mode = [], [], [], [], 0, ocr.TeamMode()
         for img in self._frames(read):
-            rows = ocr.read_frame(img, 24)
+            team = mode.check(img, 24)
+            rows = ocr.read_frame(img, 24, team=team)
+            if mode.on:
+                used = [u for u in used if u[1]]
             if not rows or sum(1 for r in rows if r["gain"]) < WITH_GAINS * len(rows):
                 continue    # the board may already be re-sorting
-            used.append(_one_row_per_rank(rows))
+            used.append((_one_row_per_rank(rows), team))
             before = {p["rank"]: p["support"] for p in merged}
-            merged, warnings = ocr.merge_frames(used)
+            merged, warnings = ocr.merge_frames([rows for rows, _ in used])
             if self._usable(merged):
                 break
             # after the scroll every frame shows the same top rows, once a few in a row add nothing for the
@@ -330,6 +345,8 @@ class _Read12:
             kept = _keep(part) if part is not None else None
             frame = _full(kept) if kept is not None else None
             rows = ocr.read_frame(frame, 12, gains=True) if frame is not None else []
+            if rows and len(rows) < 12 and _row_unread(frame, rows):
+                rows = []
             if len(rows) * 2 >= 12 and same_reads(rows, before):
                 players = [{"full_name": r["name"], "white_score": r["total"], "green_score": r["gain"]} for r in rows]
                 return {"players": players, "tidy": [r["ti"] for r in rows] == list(range(len(rows))),
