@@ -5,11 +5,14 @@ import random
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-EDGE = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+BROWSERS = [r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"]
+BROWSER = next((b for b in BROWSERS if Path(b).is_file()), BROWSERS[-1])
 PORT = 12431
 
 TEAMS = {tag: [f"Player {i * 4 + n}" for n in range(1, 5)] for i, tag in enumerate("ABCDEF")}
@@ -28,6 +31,7 @@ def race(totals, order):
 
 
 def main():
+    started = time.time()
     data = Path(tempfile.mkdtemp(prefix="mogi_docs_"))
     (data / "settings.json").write_text(json.dumps(
         {"hotkey": "", "lobby": 24, "format": "4v4", "my_tag": "B", "port": PORT}), encoding="utf-8")
@@ -65,7 +69,7 @@ def main():
 
     docs = ROOT / "docs"
     docs.mkdir(exist_ok=True)
-    base = [EDGE, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--force-device-scale-factor=1.5",
+    base = [BROWSER, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--force-device-scale-factor=1.5",
             "--virtual-time-budget=4000", f"--user-data-dir={data / 'edge'}"]
     url = f"http://127.0.0.1:{controller.port}"
     subprocess.run(base + ["--window-size=1040,760", f"--screenshot={docs / 'app.png'}", url + "/?once"], check=True, timeout=60)
@@ -80,6 +84,9 @@ def main():
     subprocess.run(base + ["--window-size=218,364", "--default-background-color=00000000",
                            f"--screenshot={docs / 'overlay-list.png'}", url + "/overlay?once&layout=list"], check=True, timeout=60)
     controller.close()
+    stale = [p.name for p in sorted(docs.glob("*.png")) if p.stat().st_mtime < started]
+    if stale:
+        raise SystemExit(f"the browser didn't write {stale}")
     print("wrote", [p.name for p in sorted(docs.glob("*.png"))])
 
 
