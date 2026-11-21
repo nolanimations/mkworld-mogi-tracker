@@ -136,7 +136,7 @@ def test_clipboard_keeps_full_tag_when_first_character_collides():
     s = Session(24, "4v4")
     s.bank = {"AB": 30, "AC": 20, "X1": 10, "Q": 5}
     s.display = {"AB": "Ab", "AC": "AC", "X1": "X1", "Q": "Queen"}
-    assert s.clipboard_text() == "AB 30 | AC 20 | X1 10 | Q 5 | @11"
+    assert s.clipboard_text() == "AB 30 | AC 20 | X 10 | Q 5 | @11"     # lounge: the first character is the team
 
 
 def test_rejoin_at_zero_is_offered_once(s):
@@ -305,7 +305,7 @@ def test_short_labels_follow_the_clipboard_rule():
     s = Session(24, "4v4")
     s.bank = {"AB": 30, "AC": 20, "X1": 10, "Q": 5}
     s.display = {"AB": "Ab", "AC": "AC", "X1": "X1", "Q": "Queen"}
-    assert [r["short"] for r in s.standings()] == ["AB", "AC", "X1", "Q"]
+    assert [r["short"] for r in s.standings()] == ["AB", "AC", "X", "Q"]
 
 
 def test_greek_tags_keep_their_own_letter():

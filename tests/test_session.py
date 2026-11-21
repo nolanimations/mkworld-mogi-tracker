@@ -136,7 +136,7 @@ def test_clipboard_keeps_full_tag_when_first_character_collides():
     s = Session(24, "4v4")
     s.bank = {"AB": 30, "AC": 20, "X1": 10, "Q": 5}
     s.display = {"AB": "Ab", "AC": "AC", "X1": "X1", "Q": "Queen"}
-    assert s.clipboard_text() == "AB 30 | AC 20 | X1 10 | Q 5 | @11"
+    assert s.clipboard_text() == "AB 30 | AC 20 | X 10 | Q 5 | @11"
 
 
 def test_rejoin_at_zero_is_offered_once(s):
@@ -306,7 +306,7 @@ def test_short_labels_follow_the_clipboard_rule():
     s = Session(24, "4v4")
     s.bank = {"AB": 30, "AC": 20, "X1": 10, "Q": 5}
     s.display = {"AB": "Ab", "AC": "AC", "X1": "X1", "Q": "Queen"}
-    assert [r["short"] for r in s.standings()] == ["AB", "AC", "X1", "Q"]
+    assert [r["short"] for r in s.standings()] == ["AB", "AC", "X", "Q"]
 
 
 def test_greek_tags_keep_their_own_letter():
@@ -529,3 +529,12 @@ def test_race_1_with_a_missed_row_is_no_11_player_start(s):
     s2 = Session(lobby=12, fmt="2v2")
     s2.apply_capture(board({n: v for n, v in t1.items() if v != 15}), tidy_board=False)   # the winner's row missed
     assert s2.suggestions == [] and all(not pl.get("open") for pl in s2.places)
+
+
+def test_short_tags_are_the_first_character_unless_two_teams_share_it():
+    s = Session(lobby=12, fmt="2v2")
+    tags = ["-50", "C", "Cr", "N", "T1", "50"]
+    s.apply_capture(board(race({}, [f"{t} {n}" for t in tags for n in ("x", "y")])))
+    short = {r["tag"]: r["short"] for r in s.standings()}
+    assert short["-50"] == "-" and short["N"] == "N" and short["T1"] == "T" and short["50"] == "5"
+    assert short["C"] == "C" and short["CR"] == "CR"       # both start with C so show in full

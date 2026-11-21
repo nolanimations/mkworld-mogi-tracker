@@ -674,8 +674,7 @@ class Session(CustomTags):
         first_chars = collections.Counter(label_of(r["tag"])[0] for r in rows)
         for r in rows:
             full = label_of(r["tag"])
-            numbered = bool(re.fullmatch(r"\D{1,3}\d+", full))
-            r["short"] = full if first_chars[full[0]] > 1 or numbered else full[0]
+            r["short"] = full if first_chars[full[0]] > 1 else full[0]   # lounge: the first character is the team
         return self._with_custom(rows)
 
     def clipboard_text(self, my_tag="", mark_mine=True):
