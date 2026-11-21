@@ -57,7 +57,7 @@ class Controller:
                 "message": self.message,
                 "settings": {k: self.settings[k] for k in
                              ("source", "monitor", "my_tag", "mark_my_tag", "auto_copy", "auto_capture",
-                              "overlay_layout", "background")},
+                              "overlay_layout", "background", "player_points")},
                 "hotkey": {"combo": self.hotkey.combo, "recording": self.hotkey.recording},
                 "watching": {"on": self.watcher is not None, "error": self.watch_error},
                 "overlay_url": f"http://127.0.0.1:{self.port}/overlay",
@@ -364,7 +364,7 @@ class Controller:
         if "format" in data:
             self.session.set_format(str(data["format"]))
         for key in ("source", "monitor", "my_tag", "mark_my_tag", "auto_copy", "auto_capture", "overlay_layout",
-                    "background"):
+                    "background", "player_points"):
             if key in data and (key not in settings.OPTIONS or data[key] in settings.OPTIONS[key]):
                 self.settings[key] = data[key]
         if "source" in data:

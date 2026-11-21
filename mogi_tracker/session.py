@@ -21,6 +21,7 @@ POINTS_PER_RACE = {24: 144, 12: 82}
 TABLE_11P = [12, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]
 UNDO_DEPTH = 20
 NAME_MATCH = 0.7
+OPEN_SPOT = "Open spot"
 
 _FOLD = str.maketrans({"l": "I", "0": "O"})
 
@@ -312,10 +313,13 @@ class Session(CustomTags):
                 notes, skip = self._occupants(pairs, gone, tidy_board, first_seen=bool(extra))
 
         pairs = [(pl, p) for pl, p in pairs if pl["id"] not in skip]
+        first = not had_scores and all(pl["total"] == p["total_score"] for pl, p in pairs)
         for pl, p in pairs:
             pl.update(total=p["total_score"], name=p["name"], pk=player_key(p["name"]), order=order[id(p)],
                       away=False)
         self._vote_teams(pairs)
+        if first and tidy_board:
+            self._eleven_player_start(pairs)
         for text in notes:
             self._suggest(f"note:{len(self.suggestions)}", "note", text, None, [])
         self.last_players = [{"name": p["name"], "total": p["total_score"]} for p in grouped]
@@ -401,6 +405,12 @@ class Session(CustomTags):
             pk = player_key(p["name"])
             origin = own[pl["id"]]
             team = self._tag(pl["team"])
+            if pl.get("open"):                    # sub fills the room's open spot
+                pl.update(open=False, origin=pk, aliases=[pk], stand_in=False)
+                notes.append(f"{p['name']} took the open spot on {team}"
+                             + (f", the {_points(pl['carried'])} it held count for them" if pl["carried"] else ""))
+                steady.append((pl, p["total_score"]))
+                continue
             if fresh:
                 if origin:
                     had = f"their {_points(pl['total'])} from before" if pl["away"] or pl["name"] == p["name"] \
@@ -453,6 +463,23 @@ class Session(CustomTags):
         best = [answer for k, answer in fits if k == fewest]
         return list(best[0]) if len(best) == 1 else None
 
+    def _eleven_player_start(self, pairs):
+        """if race 1 with 11 players (12p), an open spot on the team that is short holds the +1s of 11 player races until a sub joins"""
+        if self.lobby != 12 or len(pairs) != 11 or any(pl.get("open") for pl in self.places):
+            return
+        if sorted((p["total_score"] for _, p in pairs), reverse=True) != TABLE_11P:
+            return
+        size = int(self.format.split("v")[0])
+        count = collections.Counter(pl["team"] for pl, _ in pairs)
+        short = [t for t, n in count.items() if n < size]
+        if len(short) != 1:
+            return              # can't tell which team is short so the race shows 15 points missing instead
+        spot = {"id": max(pl["id"] for pl in self.places) + 1, "origin": "", "aliases": [], "pk": "",
+                "name": OPEN_SPOT, "total": 0, "carried": 0, "away": True, "stand_in": False, "votes": {},
+                "team": short[0], "order": 11, "open": True}
+        self.places.append(spot)
+        self._eleven_players([(pl, p["total_score"]) for pl, p in pairs], [spot])
+
     def _eleven_players(self, steady, away):
         if self.lobby != 12:
             return
@@ -465,10 +492,12 @@ class Session(CustomTags):
         adds = [{"place": pl["id"], "points": 3 if pl is first else 2 if pl is second else 1}
                 for pl, g in steady if g > 0]
         adds.append({"place": idle[0]["id"], "points": 1})
+        missing = (f"the open spot on {self._tag(idle[0]['team'])}" if idle[0].get("open") else
+                   f"{idle[0]['name']}, who missed this race")
         self._suggest("comp11", "comp11",
                       f"Looks like an 11 player race. The usual correction is +3 for 1st ({first['name']}), "
-                      f"+2 for 2nd ({second['name']}), +1 for everyone else and +1 for {idle[0]['name']}, "
-                      "who missed this race", "Add 15 points", adds)
+                      f"+2 for 2nd ({second['name']}), +1 for everyone else and +1 for {missing}",
+                      "Add 15 points", adds)
 
     def _vote_teams(self, pairs):
         """Each place votes for the team its group belongs to (stand-ins don't vote)"""

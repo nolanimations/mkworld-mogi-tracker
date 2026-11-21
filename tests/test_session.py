@@ -494,3 +494,38 @@ def test_custom_tag_limit_reset_undo_and_new_mogi(s):
     s.set_custom_tag("A", "V$")
     s.reset()
     assert s.custom == {}
+
+
+def test_mogi_that_starts_with_11_players_gets_an_open_spot_until_a_sub_joins(s):
+    # 2v2, F two never shows up: F one's team is a player short
+    racers = [n for n in names_12p() if n != "F two"]
+    t1 = race({}, racers, TABLE_11P)
+    s.apply_capture(board(t1))
+    comp = next(x for x in s.suggestions if x["kind"] == "comp11")
+    assert "open spot on F" in comp["text"]
+    s.apply_suggestion("comp11")
+    assert s.race_info() == {"number": 1, "of": 12, "left": 11, "grand": 82, "delta": 0}
+    assert totals_by_tag(s)["F"] == t1["F one"] + 1 + 1             # F one's +1 and the open spot's +1
+    # race 2: still 11
+    t2 = race(t1, racers[::-1], TABLE_11P)
+    s.apply_capture(board(t2))
+    assert [x["kind"] for x in s.suggestions] == ["comp11"]
+    s.apply_suggestion("comp11")
+    assert s.race_info()["grand"] == 164
+    # race 3: a sub fills the spot from 0 and inherits its 2 points
+    t3 = race(t2, racers + ["F sub"], TABLE_12P)
+    s.apply_capture(board(t3))
+    assert [x["kind"] for x in s.suggestions] == ["note"]
+    assert "F sub took the open spot on F, the 2 points it held count for them" in s.suggestions[0]["text"]
+    members = {m["name"]: m["total"] for r in s.standings() for m in r["members"]}
+    assert members["F sub"] == t3["F sub"] + 2
+    assert s.race_info() == {"number": 3, "of": 12, "left": 9, "grand": 246, "delta": 0}
+
+
+def test_race_1_with_a_missed_row_is_no_11_player_start(s):
+    t1 = race({}, names_12p())
+    s.apply_capture(board({n: v for n, v in t1.items() if v != 1}))   # 12th place not read: the 15 is still there
+    assert s.suggestions == [] and all(not pl.get("open") for pl in s.places)
+    s2 = Session(lobby=12, fmt="2v2")
+    s2.apply_capture(board({n: v for n, v in t1.items() if v != 15}), tidy_board=False)   # the winner's row missed
+    assert s2.suggestions == [] and all(not pl.get("open") for pl in s2.places)

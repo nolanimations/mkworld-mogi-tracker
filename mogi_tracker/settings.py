@@ -15,6 +15,7 @@ DEFAULTS = {
     "auto_capture": False,
     "overlay_layout": "bar",
     "background": "dark",
+    "player_points": True,       # each player's points next to their name in the team rows
     "port": 12424,
     "scoring": "places",         # "classic": the old DC logic (session_classic.py), only set by hand in settings.json
 }

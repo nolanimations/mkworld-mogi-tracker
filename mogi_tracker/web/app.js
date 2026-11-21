@@ -175,7 +175,11 @@
       who.append(line);
       const members = el("span", "members");
       if (t.bank) members.append(el("span", "bank-chip", `bank ${t.bank > 0 ? "+" : ""}${t.bank}`));
-      members.append(t.members.map((m) => m.name).join(", "));
+      t.members.forEach((m, i) => {
+        if (i) members.append(", ");
+        members.append(m.name);
+        if (state.settings.player_points) members.append(" ", el("b", "pp", m.total));
+      });
       who.append(members);
       const points = el("div", "points");
       points.append(el("span", "total", t.total));
@@ -306,6 +310,7 @@
     if (document.activeElement !== $("my-tag")) $("my-tag").value = s.my_tag;
     $("mark-my-tag").checked = s.mark_my_tag;
     $("auto-copy").checked = s.auto_copy;
+    $("player-points").checked = s.player_points;
     $("auto-capture").checked = s.auto_capture;
     drawSeg("seg-overlay", [["bar", "Bar"], ["list", "List"]], s.overlay_layout, (v) => post("settings", { overlay_layout: v }));
     $("overlay-url").value = state.overlay_url;
@@ -390,6 +395,7 @@
   $("my-tag").addEventListener("change", (e) => post("settings", { my_tag: e.target.value }));
   $("mark-my-tag").addEventListener("change", (e) => post("settings", { mark_my_tag: e.target.checked }));
   $("auto-copy").addEventListener("change", (e) => post("settings", { auto_copy: e.target.checked }));
+  $("player-points").addEventListener("change", (e) => post("settings", { player_points: e.target.checked }));
   $("auto-capture").addEventListener("change", (e) => post("settings", { auto_capture: e.target.checked }));
   $("btn-overlay-copy").addEventListener("click", async () => {
     $("overlay-url").select();

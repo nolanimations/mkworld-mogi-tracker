@@ -299,6 +299,8 @@ button { cursor: pointer; }
   user-select: text; padding-left: 1px;
 }
 .row.mine .members { color: rgba(36, 26, 0, 0.8); font-weight: 600; }
+.members .pp { color: #fff; font-weight: 800; }
+.row.mine .members .pp { color: #241a00; }
 .bank-chip {
   display: inline-block; margin-right: 7px; padding: 0 7px; border-radius: 999px; font-weight: 700; font-size: 11px;
   color: #241a00; background: rgba(255, 212, 38, 0.92);
