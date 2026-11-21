@@ -2,6 +2,7 @@
 (() => {
   "use strict";
   const params = new URLSearchParams(location.search);
+  if (window.parent !== window) window.parent.postMessage("mkw-overlay-ready", "*");
   const root = document.getElementById("overlay");
   const fixedScale = parseFloat(params.get("scale"));
 

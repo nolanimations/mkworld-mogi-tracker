@@ -314,6 +314,7 @@
     $("auto-capture").checked = s.auto_capture;
     drawSeg("seg-overlay", [["bar", "Bar"], ["list", "List"]], s.overlay_layout, (v) => post("settings", { overlay_layout: v }));
     $("overlay-url").value = state.overlay_url;
+    $("overlay-file").value = state.overlay_file;
     $("overlay-size").textContent = `Source size: ${OVERLAY_SIZE[s.overlay_layout]}`;
     drawSeg("seg-background", [["dark", "Dark"], ["blue", "Blue"], ["light", "Light"]], s.background, (v) => post("settings", { background: v }));
     $("credits").textContent = `MKWorld Mogi Tracker ${state.version}. Racers Delight font by @ImWhoreHay, M PLUS 1p by the M+ Project. Text recognition built on PaddleOCR (Apache License 2.0). Not affiliated with Nintendo.`;
@@ -397,13 +398,14 @@
   $("auto-copy").addEventListener("change", (e) => post("settings", { auto_copy: e.target.checked }));
   $("player-points").addEventListener("change", (e) => post("settings", { player_points: e.target.checked }));
   $("auto-capture").addEventListener("change", (e) => post("settings", { auto_capture: e.target.checked }));
-  $("btn-overlay-copy").addEventListener("click", async () => {
-    $("overlay-url").select();
-    try { await navigator.clipboard.writeText($("overlay-url").value); } catch { document.execCommand("copy"); }
-    const b = $("btn-overlay-copy");
-    b.textContent = "Copied";
-    setTimeout(() => { b.textContent = "Copy"; }, 1600);
-  });
+  async function copyField(button, field) {
+    $(field).select();
+    try { await navigator.clipboard.writeText($(field).value); } catch { document.execCommand("copy"); }
+    $(button).textContent = "Copied";
+    setTimeout(() => { $(button).textContent = "Copy"; }, 1600);
+  }
+  $("btn-overlay-copy").addEventListener("click", () => copyField("btn-overlay-copy", "overlay-url"));
+  $("btn-overlay-file-copy").addEventListener("click", () => copyField("btn-overlay-file-copy", "overlay-file"));
   $("btn-last").addEventListener("click", () => post("open_folder", { which: "last" }));
   $("btn-licences").addEventListener("click", () => post("open_licences"));
 

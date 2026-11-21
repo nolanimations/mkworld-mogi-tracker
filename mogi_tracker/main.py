@@ -56,6 +56,7 @@ def main():
         _alert(f"{APP_NAME} could not start: {e}")
         return
     log.info("serving on %s", url)
+    controller.overlay_file = str(server.write_overlay_file(controller.port))
 
     stop = threading.Event()
 

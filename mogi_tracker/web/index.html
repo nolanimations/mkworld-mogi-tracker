@@ -108,10 +108,15 @@
     <h3>OBS overlay</h3>
     <div class="seg wide" id="seg-overlay" role="group" aria-label="Overlay layout"></div>
     <div class="line">
+      <input id="overlay-file" class="input grow" type="text" readonly aria-label="Overlay file">
+      <button class="pill-btn" id="btn-overlay-file-copy" type="button">Copy</button>
+    </div>
+    <p class="hint">Add a Browser Source in OBS, tick <b>Local file</b> and use this file</p>
+    <p class="hint">Alternatively, paste this address as a Browser Source instead if you want to use scaling parameters</p>
+    <div class="line">
       <input id="overlay-url" class="input grow" type="text" readonly aria-label="Overlay address">
       <button class="pill-btn" id="btn-overlay-copy" type="button">Copy</button>
     </div>
-    <p class="hint">Add a Browser Source in OBS with this address. App has to be running</p>
     <p class="hint" id="overlay-size"></p>
   </section>
 

@@ -149,6 +149,38 @@ def _make_handler(controller, token):
     return Handler
 
 
+# Create an always-present file so you don't have to start the tracker before OBS
+_OVERLAY_FILE = """<!doctype html>
+<meta charset="utf-8">
+<title>Mogi Tracker Overlay</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+  iframe { display: block; width: 100%; height: 100%; border: 0; background: transparent; visibility: hidden; }
+</style>
+<iframe id="overlay" allowtransparency="true"></iframe>
+<script>
+  const frame = document.getElementById("overlay"), url = __URL__;
+  let ready = false;
+  addEventListener("message", (e) => {
+    if (e.data === "mkw-overlay-ready") { ready = true; frame.style.visibility = "visible"; }
+  });
+  function attempt() { if (!ready) frame.src = url + "?t=" + Date.now(); }
+  frame.addEventListener("load", () => setTimeout(attempt, 3000));
+  attempt();
+</script>
+"""
+
+
+def write_overlay_file(port):
+    path = paths.data_dir() / "overlay.html"
+    try:
+        path.write_text(_OVERLAY_FILE.replace("__URL__", json.dumps(f"http://127.0.0.1:{port}/overlay")),
+                        encoding="utf-8")
+    except OSError as e:
+        log.warning("could not write the overlay file: %s", e)
+    return path
+
+
 def _is_ours(port) -> bool:
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/ping", timeout=1) as r:

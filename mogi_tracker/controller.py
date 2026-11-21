@@ -43,6 +43,7 @@ class Controller:
         self.update = None          # newer release
         self.updating = False
         self.quit = None
+        self.overlay_file = ""
         threading.Thread(target=self._warm_up, daemon=True).start()
         threading.Thread(target=self._check_update, daemon=True).start()
         self._sync_watcher()
@@ -61,6 +62,7 @@ class Controller:
                 "hotkey": {"combo": self.hotkey.combo, "recording": self.hotkey.recording},
                 "watching": {"on": self.watcher is not None, "error": self.watch_error},
                 "overlay_url": f"http://127.0.0.1:{self.port}/overlay",
+                "overlay_file": self.overlay_file,
                 "version": __version__,
                 "update": self.update and {"version": self.update["version"], "updating": self.updating,
                                            "auto": updates.can_install(self.update) and self.quit is not None},
