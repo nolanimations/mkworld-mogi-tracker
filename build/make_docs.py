@@ -10,6 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+from mogi_tracker import __version__  # noqa: E402
 BROWSERS = [r"C:\Program Files\Google\Chrome\Application\chrome.exe",
             r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"]
 BROWSER = next((b for b in BROWSERS if Path(b).is_file()), BROWSERS[-1])
@@ -34,7 +35,8 @@ def main():
     started = time.time()
     data = Path(tempfile.mkdtemp(prefix="mogi_docs_"))
     (data / "settings.json").write_text(json.dumps(
-        {"hotkey": "", "lobby": 24, "format": "4v4", "my_tag": "B", "port": PORT}), encoding="utf-8")
+        {"hotkey": "", "lobby": 24, "format": "4v4", "my_tag": "B", "port": PORT, "last_version": __version__}),
+        encoding="utf-8")
     os.environ["MKW_TRACKER_DATA_DIR"] = str(data)
 
     from mogi_tracker import server

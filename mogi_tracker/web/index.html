@@ -22,6 +22,14 @@
       <span class="field-label">Format</span>
       <div class="seg" id="seg-format" role="group" aria-label="Team format"></div>
     </div>
+    <div class="field">
+      <span class="field-label">Races</span>
+      <div class="seg stepper" role="group" aria-label="Races in the mogi">
+        <button type="button" id="races-down" aria-label="Fewer races">−</button>
+        <span class="races-num" id="races-num">12</span>
+        <button type="button" id="races-up" aria-label="More races">+</button>
+      </div>
+    </div>
   </div>
   <button class="round-btn" id="btn-settings" type="button" aria-label="Settings" title="Settings">
     <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor">
@@ -32,7 +40,7 @@
 </header>
 
 <section class="racebar" aria-label="Race progress">
-  <div class="race-count"><span class="race-word">RACE</span><span class="race-num" id="race-num">–</span><span class="race-of">/12</span></div>
+  <div class="race-count"><span class="race-word">RACE</span><span class="race-num" id="race-num">–</span><span class="race-of" id="race-of">/12</span></div>
   <div class="flags" id="flags" aria-hidden="true"></div>
   <div class="race-note" id="race-note" hidden></div>
   <div class="message" id="message" role="status" aria-live="polite"></div>

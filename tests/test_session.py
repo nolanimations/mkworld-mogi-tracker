@@ -598,3 +598,17 @@ def test_team_rooms_are_never_hinted_to_be_ffa():
     s = Session(lobby=12, fmt="2v2")
     s.apply_capture(board(race({}, FFA_NAMES)))             # 12 different first letters... almost
     assert s.format_hint() != "FFA"
+
+
+def test_race_count_can_be_changed():
+    s = Session(lobby=12, fmt="2v2", races=8)
+    t = race({}, names_12p())
+    s.apply_capture(board(t))
+    assert s.race_info() == {"number": 1, "of": 8, "left": 7, "grand": 82, "delta": 0}
+    assert s.clipboard_text().endswith("@7")
+    for _ in range(9):
+        t = race(t, names_12p())
+    s.apply_capture(board(t))
+    assert s.race_info()["number"] == 8 and s.race_info()["left"] == 0
+    s.races = 16
+    assert s.race_info() == {"number": 10, "of": 16, "left": 6, "grand": 820, "delta": 0}

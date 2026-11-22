@@ -197,6 +197,13 @@ button { cursor: pointer; }
 }
 .seg button:hover { color: #fff; background: rgba(255, 255, 255, 0.14); }
 .seg button[aria-pressed="true"] { color: var(--ui-ink); background: #fff; box-shadow: 0 2px 0 rgba(0, 0, 0, 0.3); }
+.stepper { align-items: center; }
+.stepper button { min-width: 30px; padding: 6px 8px; font-size: 15px; line-height: 1; }
+.stepper button:disabled { opacity: 0.35; pointer-events: none; }
+.races-num {
+  min-width: 36px; padding: 6px 4px; border-radius: 999px; text-align: center; font-weight: 800; font-size: 13px;
+  color: var(--ui-ink); background: #fff; box-shadow: 0 2px 0 rgba(0, 0, 0, 0.3);
+}
 
 .round-btn {
   width: 42px; height: 42px; border-radius: 50%; border: 0; flex: none;

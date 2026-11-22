@@ -20,7 +20,7 @@ Windows may show a "Windows protected your PC" notice the first time, because th
 ## How to use
 
 Mario Kart World HAS to be 16:9 fullscreen for this tracker to work at all!
-1. Pick the room size (**24** or **12**) and the team **format** at the top
+1. Pick the room size (**24** or **12**), the team **format** and the number of **races** (12 by default) at the top
 2. Open settings (the cog) and choose the capture source:
    - **Screen** takes a screenshot, and the game has to be fullscreen
    - **OBS Virtual Camera** reads your OBS (for capture cards) all you have to do is press *Start Virtual

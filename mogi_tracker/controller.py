@@ -13,7 +13,6 @@ from PIL import Image
 
 from . import __version__, autocapture, capture, hotkey, ocr, paths, settings, updates
 from . import session as places_session, session_classic
-from .session import TOTAL_RACES
 
 log = logging.getLogger(__name__)
 
@@ -22,9 +21,10 @@ MIN_SHARE = 2   # a capture counts only if at least 1/MIN_SHARE of the room was 
 
 class Controller:
     def __init__(self):
+        first_run = not settings.exists()
         self.settings = settings.load()
         engine = session_classic if self.settings["scoring"] == "classic" else places_session
-        self.session = engine.Session(self.settings["lobby"], self.settings["format"])
+        self.session = engine.Session(self.settings["lobby"], self.settings["format"], self.settings["races"])
         log.info("scoring: %s", self.settings["scoring"])
         self.lock = threading.RLock()
         self.changed_cond = threading.Condition()
@@ -44,6 +44,7 @@ class Controller:
         self.updating = False
         self.quit = None
         self.overlay_file = ""
+        self.updated = self._just_updated(first_run)   # this version, on its first start after an update
         threading.Thread(target=self._warm_up, daemon=True).start()
         threading.Thread(target=self._check_update, daemon=True).start()
         self._sync_watcher()
@@ -64,6 +65,7 @@ class Controller:
                 "overlay_url": f"http://127.0.0.1:{self.port}/overlay",
                 "overlay_file": self.overlay_file,
                 "version": __version__,
+                "updated": self.updated,
                 "update": self.update and {"version": self.update["version"], "updating": self.updating,
                                            "auto": updates.can_install(self.update) and self.quit is not None},
             })
@@ -88,6 +90,26 @@ class Controller:
             with self.lock:
                 self.update = update
             self.changed()
+
+    def _just_updated(self, first_run):
+        """True on the first start of a newer version. Settings from before this check have no version in them,
+        those count as an update too (a fresh install has no settings at all)"""
+        last = self.settings["last_version"]
+        if last == __version__:
+            return False
+        self.settings["last_version"] = __version__
+        self.settings = settings.save(self.settings)
+        if first_run:
+            return False
+        before = updates.parse_version(last) if last else (0,)
+        return before is None or updates.parse_version(__version__) > before
+
+    def _do_changelog(self, _):
+        webbrowser.open(f"{updates.RELEASES}/tag/v{__version__}")
+        self.updated = False
+
+    def _do_dismiss_updated(self, _):
+        self.updated = False
 
     def _do_update(self, data):
         up = self.update
@@ -244,7 +266,7 @@ class Controller:
             if outcome.get("failed"):
                 self.say("Auto-capture could not read the scoreboard, see tracker.log", "bad")
             elif outcome.get("missed"):
-                final = self.session.race_info()["number"] == TOTAL_RACES - 1
+                final = self.session.race_info()["number"] == self.session.races - 1
                 self.say("Missed the final scoreboard. Add last race's points by hand" if final else
                          "Missed this race's scoreboard. It should catch up after the next race", "bad")
             else:
@@ -365,6 +387,9 @@ class Controller:
                 self.say("capture once the scoreboard finishes adding points")
         if "format" in data:
             self.session.set_format(str(data["format"]))
+        races = data.get("races")
+        if isinstance(races, int) and not isinstance(races, bool) and settings.RACES[0] <= races <= settings.RACES[1]:
+            self.session.races = self.settings["races"] = races
         for key in ("source", "monitor", "my_tag", "mark_my_tag", "auto_copy", "auto_capture", "overlay_layout",
                     "background", "player_points"):
             if key in data and (key not in settings.OPTIONS or data[key] in settings.OPTIONS[key]):

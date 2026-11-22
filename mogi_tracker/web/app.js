@@ -53,6 +53,10 @@
   function drawRace() {
     const r = state.race;
     $("race-num").textContent = r.number || "–";
+    $("race-of").textContent = `/${r.of}`;
+    $("races-num").textContent = r.of;
+    $("races-down").disabled = r.of <= 1;
+    $("races-up").disabled = r.of >= 32;
     const flags = $("flags");
     if (flags.children.length !== r.of) flags.replaceChildren(...Array.from({ length: r.of }, () => el("i")));
     [...flags.children].forEach((f, i) => f.classList.toggle("done", i < r.number));
@@ -77,6 +81,16 @@
   // notices
   function drawNotices() {
     const items = [];
+    if (state.updated) {
+      const n = el("div", "notice note");
+      n.append(el("p", "", `Update successful, you're on version ${state.version}.`));
+      const log = el("button", "pill-btn gold", "See changelog");
+      log.addEventListener("click", () => post("changelog"));
+      const ok = el("button", "pill-btn ghost", "OK");
+      ok.addEventListener("click", () => post("dismiss_updated"));
+      n.append(log, ok);
+      items.push(n);
+    }
     const up = state.update;
     if (up && laterUpdate !== up.version) {
       const n = el("div", "notice note");
@@ -403,6 +417,8 @@
   $("mark-my-tag").addEventListener("change", (e) => post("settings", { mark_my_tag: e.target.checked }));
   $("auto-copy").addEventListener("change", (e) => post("settings", { auto_copy: e.target.checked }));
   $("player-points").addEventListener("change", (e) => post("settings", { player_points: e.target.checked }));
+  $("races-down").addEventListener("click", () => post("settings", { races: state.race.of - 1 }));
+  $("races-up").addEventListener("click", () => post("settings", { races: state.race.of + 1 }));
   $("auto-capture").addEventListener("change", (e) => post("settings", { auto_capture: e.target.checked }));
   async function copyField(button, field) {
     $(field).select();

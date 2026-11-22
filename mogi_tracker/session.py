@@ -87,9 +87,10 @@ class Session(CustomTags):
     _FIELDS = ("lobby", "format", "bank", "display", "places", "last_players", "prev_totals", "prev_ranks",
                "suggestions", "custom")
 
-    def __init__(self, lobby=24, fmt="4v4"):
+    def __init__(self, lobby=24, fmt="4v4", races=TOTAL_RACES):
         self.lobby = lobby
         self.format = fmt
+        self.races = races          # races in this mogi (tournaments: 8, 16, ...)
         self._undo = []
         self._clear()
 
@@ -155,11 +156,11 @@ class Session(CustomTags):
     def race_info(self):
         grand = self.grand_total()
         per_race = POINTS_PER_RACE[self.lobby]
-        number = min(TOTAL_RACES, max(1, round(grand / per_race))) if grand else 0
+        number = min(self.races, max(1, round(grand / per_race))) if grand else 0
         return {
             "number": number,
-            "of": TOTAL_RACES,
-            "left": TOTAL_RACES - number,
+            "of": self.races,
+            "left": self.races - number,
             "grand": grand,
             "delta": grand - number * per_race if grand else 0,
         }
@@ -442,7 +443,7 @@ class Session(CustomTags):
 
     def _race_ok(self, points):
         per = POINTS_PER_RACE[self.lobby]
-        for k in range(1, TOTAL_RACES + 1):
+        for k in range(1, max(self.races, TOTAL_RACES) + 1):
             if points == per * k or (self.lobby == 12 and points == per * k - (per - sum(TABLE_11P))):
                 return k
         return None
