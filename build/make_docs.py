@@ -83,7 +83,7 @@ def main():
     controller.settings["background"] = "dark"
     subprocess.run(base + ["--window-size=886,118", "--default-background-color=00000000",
                            f"--screenshot={docs / 'overlay.png'}", url + "/overlay?once&layout=bar"], check=True, timeout=60)
-    subprocess.run(base + ["--window-size=218,364", "--default-background-color=00000000",
+    subprocess.run(base + ["--window-size=230,364", "--default-background-color=00000000",
                            f"--screenshot={docs / 'overlay-list.png'}", url + "/overlay?once&layout=list"], check=True, timeout=60)
     controller.close()
     stale = [p.name for p in sorted(docs.glob("*.png")) if p.stat().st_mtime < started]
