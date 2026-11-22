@@ -175,7 +175,12 @@
       who.append(line);
       const members = el("span", "members");
       if (t.bank) members.append(el("span", "bank-chip", `bank ${t.bank > 0 ? "+" : ""}${t.bank}`));
-      t.members.forEach((m, i) => {
+      const shown = state.settings.player_points ? [...t.members].sort((a, b) => b.total - a.total) : t.members;
+      shown.forEach((m, i) => {
+        if (state.format === "FFA") {           // the row is the player: only say when they were read differently
+          if (m.name !== t.tag) members.append(`read as ${m.name}`);
+          return;
+        }
         if (i) members.append(", ");
         members.append(m.name);
         if (state.settings.player_points) members.append(" ", el("b", "pp", m.total));
@@ -254,6 +259,7 @@
 
   // dock
   function drawDock() {
+    $("adj-tag").placeholder = state.format === "FFA" ? "Name" : "Tag";
     const busy = state.busy, btn = $("btn-capture");
     btn.classList.toggle("reading", busy);       // while reading, a click cancels
     btn.disabled = state.cancelling;

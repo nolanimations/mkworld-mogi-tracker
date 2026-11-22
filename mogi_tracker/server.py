@@ -86,7 +86,7 @@ def _make_handler(controller, token):
             if path == "/overlay":
                 return self._file(web / "overlay.html")
             if path == "/api/ping":
-                return self._json({"app": APP_NAME})
+                return self._json({"app": APP_NAME, "run": RUN})
             if path == "/api/state":
                 return self._json(controller.state())
             if path == "/api/events":
@@ -179,6 +179,9 @@ def write_overlay_file(port):
     except OSError as e:
         log.warning("could not write the overlay file: %s", e)
     return path
+
+
+RUN = secrets.token_hex(4)   # this run of the app: an overlay that sees a new one reloads to get the current code
 
 
 def _is_ours(port) -> bool:

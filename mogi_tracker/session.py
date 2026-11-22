@@ -317,6 +317,12 @@ class Session(CustomTags):
         for pl, p in pairs:
             pl.update(total=p["total_score"], name=p["name"], pk=player_key(p["name"]), order=order[id(p)],
                       away=False)
+        for pl, p in pairs:
+            # how the place's own player was read (FFA shows the usual one): readings like their first name only,
+            # so a bot that kept their points doesn't rename them
+            if not pl["stand_in"] and _alike(player_key(p["name"]), pl["origin"]) >= MISREAD_ALIKE:
+                names = pl.setdefault("names", {})
+                names[p["name"]] = names.get(p["name"], 0) + 1
         self._vote_teams(pairs)
         if first and tidy_board:
             self._eleven_player_start(pairs)
@@ -469,9 +475,12 @@ class Session(CustomTags):
             return
         if sorted((p["total_score"] for _, p in pairs), reverse=True) != TABLE_11P:
             return
-        size = int(self.format.split("v")[0])
-        count = collections.Counter(pl["team"] for pl, _ in pairs)
-        short = [t for t, n in count.items() if n < size]
+        if self.format == teams.FFA:
+            short = [team_key(OPEN_SPOT)]
+        else:
+            size = int(self.format.split("v")[0])
+            count = collections.Counter(pl["team"] for pl, _ in pairs)
+            short = [t for t, n in count.items() if n < size]
         if len(short) != 1:
             return              # can't tell which team is short so the race shows 15 points missing instead
         spot = {"id": max(pl["id"] for pl in self.places) + 1, "origin": "", "aliases": [], "pk": "",
@@ -573,6 +582,11 @@ class Session(CustomTags):
         self.suggestions.append({"id": sid, "kind": kind, "text": text, "button": button, "adds": adds})
 
     def _tag(self, key):
+        if self.format == teams.FFA:            # the player's name, as it was read most often
+            pl = next((pl for pl in self.places if pl["team"] == key), None)
+            if pl:
+                names = pl.get("names") or {pl["name"]: 1}
+                return max(names, key=names.get)      # a tie goes to the name seen first
         return self.display.get(key, key)
 
     def apply_suggestion(self, sid):
@@ -654,7 +668,11 @@ class Session(CustomTags):
         mine = self.resolve_tag(my_tag)[1] if my_tag else None
         mine = mine if isinstance(mine, str) else None
         rows, above = [], None
-        for key in sorted(totals, key=lambda k: (-totals[k], k)):
+        board_order = {}                       # FFA: a tie keeps the game's order, as on the scoreboard
+        for pl in self.places:
+            board_order[pl["team"]] = min(board_order.get(pl["team"], 99), pl["order"])
+        tie = (lambda k: (board_order.get(k, 99), k)) if self.format == teams.FFA else (lambda k: (0, k))
+        for key in sorted(totals, key=lambda k: (-totals[k], tie(k))):
             before = self.prev_totals.get(key) if self.prev_totals else None
             was = self.prev_ranks.get(key) if self.prev_ranks else None
             rows.append({
@@ -675,13 +693,17 @@ class Session(CustomTags):
         for r in rows:
             full = label_of(r["tag"])
             r["short"] = full if first_chars[full[0]] > 1 else full[0]   # lounge: the first character is the team
+            if self.format == teams.FFA:
+                r["short"] = r["tag"]
         return self._with_custom(rows)
 
     def clipboard_text(self, my_tag="", mark_mine=True):
-        """`A 120 | B 98 | @7`"""
+        """`A 120 | B 98 | @7`, in FFA a line per player: `Leafeon 106`"""
         rows = self.standings(my_tag)
         if not rows:
             return ""
+        if self.format == teams.FFA:
+            return "\n".join(f"{r['tag']} {r['total']}" for r in rows)
         parts = []
         for r in rows:
             label = r["short"]

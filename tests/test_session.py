@@ -538,3 +538,63 @@ def test_short_tags_are_the_first_character_unless_two_teams_share_it():
     short = {r["tag"]: r["short"] for r in s.standings()}
     assert short["-50"] == "-" and short["N"] == "N" and short["T1"] == "T" and short["50"] == "5"
     assert short["C"] == "C" and short["CR"] == "CR"       # both start with C so show in full
+
+
+FFA_NAMES = ["Lantern", "メロメロ", "Moth", "I:·I 9000K", "メカニカル", "ゆきだるま", "Mothra812", "I:·I Tirane",
+             "L◇たまごやき", "Nolanimati", "Goatman4000", "Goatwoman"]
+
+
+def test_ffa_every_player_is_their_own_row_with_their_full_name():
+    s = Session(lobby=12, fmt="FFA")
+    t1 = race({}, FFA_NAMES)
+    s.apply_capture(board(t1))
+    rows = s.standings()
+    assert len(rows) == 12 and [r["tag"] for r in rows] == FFA_NAMES
+    assert all(r["short"] == r["tag"] for r in rows)
+    assert s.clipboard_text().split("\n")[:3] == ["Lantern 15", "メロメロ 12", "Moth 10"]
+    assert s.format_hint() is None
+    t2 = race(t1, FFA_NAMES[::-1])
+    s.apply_capture(board({("Mothra8l2" if n == "Mothra812" else n): v for n, v in t2.items()}))
+    assert {r["tag"]: r["total"] for r in s.standings()}["Mothra812"] == t2["Mothra812"]
+    assert s.race_info()["grand"] == 164
+
+
+def test_ffa_bot_keeps_the_points_of_the_player_it_replaced():
+    s = Session(lobby=12, fmt="FFA")
+    t1 = race({}, FFA_NAMES)
+    s.apply_capture(board(t1))
+    had = t1["Moth"]
+    t2 = race({("Swoop" if n == "Moth" else n): v for n, v in t1.items()}, FFA_NAMES[:2] + ["Swoop"] + FFA_NAMES[3:])
+    s.apply_capture(board(t2))
+    totals = {r["tag"]: r["total"] for r in s.standings()}
+    assert totals["Moth"] == t2["Swoop"] and t2["Swoop"] == had + 10
+    assert s.race_info()["delta"] == 0
+
+
+def test_ffa_11_player_start_gets_its_own_open_spot_row():
+    s = Session(lobby=12, fmt="FFA")
+    t1 = race({}, FFA_NAMES[:11], TABLE_11P)
+    s.apply_capture(board(t1))
+    s.apply_suggestion("comp11")
+    totals = {r["tag"]: r["total"] for r in s.standings()}
+    assert totals["Open spot"] == 1 and s.race_info()["grand"] == 82
+    t2 = race(t1, FFA_NAMES, TABLE_12P)                                     # GOATWOMAN TAKES OVER!!! graaaaaah
+    s.apply_capture(board(t2))
+    totals = {r["tag"]: r["total"] for r in s.standings()}
+    assert "Open spot" not in totals and totals["Goatwoman"] == t2["Goatwoman"] + 1
+
+
+def test_switching_to_ffa_mid_mogi_keeps_every_players_points():
+    s = Session(lobby=12, fmt="2v2")
+    t = race({}, names_12p())
+    s.apply_capture(board(t))
+    s.set_format("FFA")
+    assert {r["tag"]: r["total"] for r in s.standings()} == t
+    s.set_format("2v2")
+    assert totals_by_tag(s) == {"A": 27, "B": 19, "C": 15, "D": 11, "E": 7, "F": 3}
+
+
+def test_team_rooms_are_never_hinted_to_be_ffa():
+    s = Session(lobby=12, fmt="2v2")
+    s.apply_capture(board(race({}, FFA_NAMES)))             # 12 different first letters... almost
+    assert s.format_hint() != "FFA"

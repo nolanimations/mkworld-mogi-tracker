@@ -8,16 +8,17 @@ import difflib
 import unicodedata
 
 TEAM_SIZES = {"2v2": 2, "3v3": 3, "4v4": 4, "6v6": 6, "8v8": 8, "12v12": 12}
+FFA = "FFA"     # free for all: no teams, every player stands alone
 LOBBY_SIZES = (24, 12)
 TAG_SYMBOLS = set("#★☆")
 
 
 def formats_for(lobby_size: int = 24) -> list[str]:
-    return [fmt for fmt, size in TEAM_SIZES.items() if lobby_size % size == 0 and lobby_size // size >= 2]
+    return [FFA] + [fmt for fmt, size in TEAM_SIZES.items() if lobby_size % size == 0 and lobby_size // size >= 2]
 
 
 def parse_team_format(team_format: str, lobby_size: int = 24):
-    size = TEAM_SIZES.get(team_format, 4)
+    size = 1 if team_format == FFA else TEAM_SIZES.get(team_format, 4)
     return {"team_size": size, "expected_teams": lobby_size // size}
 
 
@@ -403,7 +404,11 @@ def assign_final_teams(grouping):
 
 def suggest_team_format(names, selected_format: str, lobby_size: int = 24):
     sizes = [len(v) for v in bucket_by([{"full_name": n} for n in names], lambda p: get_first_char_key(p["full_name"])).values()]
+    if selected_format == FFA:
+        return None             # picked on purpose
     for fmt in formats_for(lobby_size):
+        if fmt == FFA:
+            continue
         info = parse_team_format(fmt, lobby_size)
         if fmt != selected_format and len(sizes) == info["expected_teams"] and all(s == info["team_size"] for s in sizes):
             return fmt
@@ -420,7 +425,21 @@ def build_players(raw_data):
     return players
 
 
+def group_ffa(raw_data):
+    """Free for all: every player is their own team, under their own name (a repeated name gets a number)"""
+    out, seen = [], collections.Counter()
+    for p in raw_data:
+        name = str(p.get("full_name", "")).strip() or "?"
+        key = upper_latin("".join(name.split()))
+        seen[key] += 1
+        out.append({"team_identifier": name if seen[key] == 1 else f"{name} {seen[key]}", "name": p.get("full_name", ""),
+                    "total_score": p["white_score"] + p["green_score"]})
+    return out
+
+
 def group_teams_first_char_primary(raw_data, team_format="4v4", lobby_size=24):
+    if team_format == FFA:
+        return group_ffa(raw_data)
     format_info = parse_team_format(team_format, lobby_size)
     team_size = format_info["team_size"]
     expected_teams = format_info["expected_teams"]
