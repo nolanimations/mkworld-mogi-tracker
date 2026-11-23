@@ -14,6 +14,7 @@ DEFAULTS = {
     "mark_my_tag": True,
     "auto_copy": False,
     "auto_capture": False,
+    "auto_accept": False,        # apply point corrections without asking, if the points add up
     "overlay_layout": "bar",
     "background": "dark",
     "player_points": True,       # each player's points next to their name in the team rows

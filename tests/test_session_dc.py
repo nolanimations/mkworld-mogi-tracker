@@ -1,3 +1,5 @@
+import pytest
+
 from mogi_tracker.ocr import POINTS_TABLE_24
 from mogi_tracker.session import Session
 
@@ -160,3 +162,34 @@ def test_24p_bot_that_stays_several_races_is_not_back():
         s.apply_capture(board(t))
         assert s.race_info() == {"number": r, "of": 12, "left": 12 - r, "grand": 144 * r, "delta": 0}
         assert not any("is back" in x["text"] for x in s.suggestions)
+
+
+def _missed_bot_24(bot_place):
+    """B p1 DCs after race 2, a bot races race 3 (not captured) and B p1 rejoins race 4"""
+    t2 = race(race({}, NAMES_24, POINTS_TABLE_24), NAMES_24, POINTS_TABLE_24)
+    others = [n for n in NAMES_24 if n != "B p1"]
+    t3 = race(t2, others[:bot_place] + ["B p1"] + others[bot_place:], POINTS_TABLE_24)
+    bot = t3["B p1"] - t2["B p1"]
+    return t2, race({**t3, "B p1": 0}, others + ["B p1"], POINTS_TABLE_24), bot
+
+
+@pytest.mark.parametrize("bot_place", [0, 11, 23])
+def test_24p_bot_in_a_race_that_was_missed_is_offered_too(bot_place):
+    s = Session(24, "4v4")
+    t2, t4, bot = _missed_bot_24(bot_place)
+    s.apply_capture(board(t2))
+    s.apply_capture(board(t4))
+    assert [x["button"] for x in s.suggestions] == [f"Bank {t2['B p1'] + bot} for BP"]
+    s.apply_suggestion(s.suggestions[0]["id"])
+    assert s.race_info() == {"number": 4, "of": 12, "left": 8, "grand": 576, "delta": 0}
+    assert place_of(s, "B p1") == t2["B p1"] + bot + 1
+
+
+def test_24p_no_bot_points_when_the_board_before_was_only_partly_read():
+    s = Session(24, "4v4")
+    t2, t4, bot = _missed_bot_24(11)
+    t1 = race({}, NAMES_24, POINTS_TABLE_24)
+    s.apply_capture(board(t1))
+    s.apply_capture(board({n: v for n, v in t2.items() if n != "F p3"}))
+    s.apply_capture(board(t4))
+    assert [x["button"] for x in s.suggestions if x["button"]] == [f"Bank {t2['B p1']} for BP"]

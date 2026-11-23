@@ -330,6 +330,7 @@
     if (document.activeElement !== $("my-tag")) $("my-tag").value = s.my_tag;
     $("mark-my-tag").checked = s.mark_my_tag;
     $("auto-copy").checked = s.auto_copy;
+    $("auto-accept").checked = s.auto_accept;
     $("player-points").checked = s.player_points;
     $("auto-capture").checked = s.auto_capture;
     drawSeg("seg-overlay", [["bar", "Bar"], ["list", "List"]], s.overlay_layout, (v) => post("settings", { overlay_layout: v }));
@@ -415,6 +416,7 @@
   $("btn-hotkey-clear").addEventListener("click", () => post("hotkey", { clear: true }));
   $("my-tag").addEventListener("change", (e) => post("settings", { my_tag: e.target.value }));
   $("mark-my-tag").addEventListener("change", (e) => post("settings", { mark_my_tag: e.target.checked }));
+  $("auto-accept").addEventListener("change", (e) => post("settings", { auto_accept: e.target.checked }));
   $("auto-copy").addEventListener("change", (e) => post("settings", { auto_copy: e.target.checked }));
   $("player-points").addEventListener("change", (e) => post("settings", { player_points: e.target.checked }));
   $("races-down").addEventListener("click", () => post("settings", { races: state.race.of - 1 }));

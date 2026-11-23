@@ -279,6 +279,9 @@ class Session(CustomTags):
         self.suggestions = [x for x in self.suggestions if x["id"] != sid]
         return s
 
+    def accept_corrections(self):
+        return []
+
     def dismiss_suggestion(self, sid):
         self.suggestions = [s for s in self.suggestions if s["id"] != sid]
 

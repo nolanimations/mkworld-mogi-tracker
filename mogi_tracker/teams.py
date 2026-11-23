@@ -8,7 +8,7 @@ import difflib
 import unicodedata
 
 TEAM_SIZES = {"2v2": 2, "3v3": 3, "4v4": 4, "6v6": 6, "8v8": 8, "12v12": 12}
-FFA = "FFA"     # free for all: no teams, every player stands alone
+FFA = "FFA"
 LOBBY_SIZES = (24, 12)
 TAG_SYMBOLS = set("#★☆")
 
@@ -23,8 +23,6 @@ def parse_team_format(team_format: str, lobby_size: int = 24):
 
 
 def upper_latin(s: str) -> str:
-    """Capitalise Latin letters only, so "a" and "A" are one tag. Other scripts keep their own case: a capital
-    can look like a different letter (Greek μ becomes Μ, which reads as M)"""
     return "".join(c.upper() if c.isascii() or "LATIN" in unicodedata.name(c, "") else c for c in s)
 
 
@@ -426,7 +424,6 @@ def build_players(raw_data):
 
 
 def group_ffa(raw_data):
-    """Free for all: every player is their own team, under their own name (a repeated name gets a number)"""
     out, seen = [], collections.Counter()
     for p in raw_data:
         name = str(p.get("full_name", "")).strip() or "?"

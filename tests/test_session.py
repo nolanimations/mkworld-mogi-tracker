@@ -395,6 +395,7 @@ def test_bot_points_go_to_the_player_it_stood_in_for(s):
 
 
 def test_missing_the_bot_race_still_works(s):
+    """B two has 9, DCs, the bot scores 2 in a race that isn't captured: both are offered"""
     t1 = race({}, names_12p())
     s.apply_capture(board(t1))
     racers = [n for n in names_12p() if n != "B two"]
@@ -402,9 +403,51 @@ def test_missing_the_bot_race_still_works(s):
     t3 = race({n: v for n, v in t2.items() if n != "Swoop"}, racers[:4] + ["B two"] + racers[4:])
     t3["B two"] = 8
     s.apply_capture(board(t3))
-    assert [x["kind"] for x in s.suggestions] == ["rejoin"] and s.suggestions[0]["button"] == "Bank 9 for B"
+    assert [x["kind"] for x in s.suggestions] == ["rejoin"] and s.suggestions[0]["button"] == "Bank 11 for B"
+    assert "9 from before and 2 from a bot" in s.suggestions[0]["text"]
     s.apply_suggestion(s.suggestions[0]["id"])
-    assert s.race_info()["grand"] == 246 - 2 and s.race_info()["number"] == 3
+    assert s.race_info() == {"number": 3, "of": 12, "left": 9, "grand": 246, "delta": 0}
+
+
+def test_missed_11_player_race_is_not_called_a_bot(s):
+    """15 points short can be an 11 player race or a bot that won (VERY rare)"""
+    t1 = race({}, names_12p())
+    s.apply_capture(board(t1))
+    others = [n for n in names_12p() if n != "C one"]
+    t2 = race({n: v for n, v in t1.items() if n != "C one"}, others, TABLE_11P)
+    t3 = race({**t2, "C one": 0}, others + ["C one"])
+    s.apply_capture(board(t3))
+    assert [x["button"] for x in s.suggestions] == ["Bank 8 for C"] and "Another 15" in s.suggestions[0]["text"]
+    s.apply_suggestion(s.suggestions[0]["id"])
+    assert s.race_info()["delta"] == -15
+
+
+def test_missed_bot_race_is_not_pinned_on_someone_else(s):
+    """E one (4 points) DCs, the bot scores 3 in a race that isn't captured, E one rejoins and gets 10. The missing
+    7 points happen to be C two's old total, but C two never left"""
+    names = names_12p()
+    t1 = race({}, names)
+    s.apply_capture(board(t1))
+    assert t1["E one"] == 4 and t1["C two"] == 7
+    others = [n for n in names if n != "E one"]
+    t2 = race(t1, others[:9] + ["E one"] + others[9:])
+    assert t2["E one"] - t1["E one"] == 3             # bot
+    t3 = race({**t2, "E one": 0}, others[:2] + ["E one"] + others[2:])
+    assert t3["E one"] == 10
+    s.apply_capture(board(t3))
+    assert not [x for x in s.suggestions if x["button"]]
+    assert s.race_info()["delta"] == -7               # E missing pts
+
+
+def test_low_total_after_a_skipped_capture_is_only_a_bot_if_the_player_could_have_restarted(s):
+    t = race({}, names_12p())
+    for _ in range(4):
+        t = race(t, names_12p())
+    s.apply_capture(board(t))
+    t2 = race(race(t, names_12p()), names_12p())
+    t2["B two"] = 17
+    s.apply_capture(board(t2))
+    assert [x["button"] for x in s.suggestions] == ["Bank 45 for B"]
 
 
 def test_skipping_several_races_is_just_a_bigger_step(s):

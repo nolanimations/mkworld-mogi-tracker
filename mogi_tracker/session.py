@@ -90,7 +90,7 @@ class Session(CustomTags):
     def __init__(self, lobby=24, fmt="4v4", races=TOTAL_RACES):
         self.lobby = lobby
         self.format = fmt
-        self.races = races          # races in this mogi (tournaments: 8, 16, ...)
+        self.races = races
         self._undo = []
         self._clear()
 
@@ -103,18 +103,23 @@ class Session(CustomTags):
         self.prev_totals = None
         self.prev_ranks = None
         self.suggestions = []
+        self._offered = set()
+        self._points_before = 0
+        self._declined = set()
 
     # undo
-    def _push_undo(self, label):
-        self._undo.append((label, {f: copy.deepcopy(getattr(self, f)) for f in self._FIELDS}))
+    def _push_undo(self, label, auto=None):
+        self._undo.append((label, {f: copy.deepcopy(getattr(self, f)) for f in self._FIELDS}, auto))
         del self._undo[:-UNDO_DEPTH]
 
     def undo(self):
         if not self._undo:
             return None
-        label, state = self._undo.pop()
+        label, state, auto = self._undo.pop()
         for f, value in state.items():
             setattr(self, f, value)
+        if auto:
+            self._declined.add(auto)
         return label
 
     def undo_label(self):
@@ -292,6 +297,7 @@ class Session(CustomTags):
         totals_before, ranks_before = self._totals(), self._ranks()
         had_scores = any(totals_before.values())
         live_before = self.live
+        self._offered, self._points_before = set(), self.grand_total()
         self.suggestions = [s for s in self.suggestions if s["kind"] != "note"]
         order = {id(p): i for i, p in enumerate(grouped)}
 
@@ -305,7 +311,8 @@ class Session(CustomTags):
             if self._reopened(pairs):
                 self._suggest("room", "room", "Most totals went back down, looks like reopen? "
                               f"The old room's {sum(live_before.values())} points are not banked yet",
-                              "Bank old room", [{"key": k, "points": pts} for k, pts in live_before.items() if pts])
+                              "Bank old room", [{"key": k, "points": pts} for k, pts in live_before.items() if pts],
+                              done=f"Looks like a reopen, banked the old room's {_points(sum(live_before.values()))}")
                 for pl, p in pairs:
                     pl["carried"], pl["away"], pl["stand_in"] = 0, False, False
                 self.places = [pl for pl, _ in pairs]
@@ -396,17 +403,34 @@ class Session(CustomTags):
         if complete and not names_changed and not back and not drops and self._race_ok(base) is None:
             fits = [(pl, p) for pl, p, fresh in fixed
                     if not fresh and self._could_start_over(p, self._race_ok(base + pl["total"]))]
-            if len(fits) == 1:
+            # in a race that wasn't captured a bot could've raced for someone
+            others = [pl for pl, p, fresh in fixed if not fresh and not any(pl is f for f, _ in fits)
+                      and self._could_have_missed_races(pl, p, base)]
+            if len(fits) == 1 and not others:
                 drops.append(fits[0])
+                base += fits[0][0]["total"]
                 decided = [d for d in decided if d[0] is not fits[0][0]]
 
+        bot = 0
+        if (complete and not names_changed and not back and len(drops) == 1
+                and len(pairs) == len(self.last_players) == self.lobby):
+            bot = self._missed_bot(base, drops[0][1])
         for pl, p in drops:
             team = self._tag(pl["team"])
             why = (f"{p['name']} went from {pl['total']} to {p['total_score']}, looks like a DC? "
                    if p["total_score"] < pl["total"] else
                    f"The points only add up if {p['name']} DC'd and rejoined. ")
-            self._suggest(f"pts:{pl['id']}", "rejoin", why + f"They seem to be missing {pl['total']} points",
-                          f"Bank {pl['total']} for {team}", [{"place": pl["id"], "points": pl["total"]}])
+            points, parts, also = pl["total"], "", ""
+            if bot and (bot < 15 or self.lobby == 24):      # 15 in 12p, 11p?
+                points += bot
+                parts = f": {pl['total']} from before and {bot} from a bot in a race that wasn't captured"
+            elif bot:
+                also = (f". Another {bot} are missing from races that weren't captured. If a bot raced for them those "
+                        f"go to {team} too, if it was 11 players add the usual correction by hand")
+            self._suggest(f"pts:{pl['id']}", "rejoin", why + f"They seem to be missing {points} points" + parts + also,
+                          f"Bank {points} for {team}", [{"place": pl["id"], "points": points}],
+                          done=f"{p['name']} DC'd and rejoined, added {_points(points)} to {team}" + parts,
+                          sure=p["total_score"] < pl["total"] and bot <= 15, score=p["total_score"])
         steady = []
         for pl, p, fresh in decided:
             pk = player_key(p["name"])
@@ -451,6 +475,19 @@ class Session(CustomTags):
     @staticmethod
     def _could_start_over(p, races):
         return races is not None and p["total_score"] <= 15 * races
+
+    def _could_have_missed_races(self, pl, p, base):
+        """Would the points add up if this place started over and a bot played for it in races that weren't captured?"""
+        per = POINTS_PER_RACE[self.lobby]
+        return any(0 <= per * k - base - pl["total"] <= 15 * (k - 1) and p["total_score"] <= 15 * (k - 1)
+                   for k in range(2, max(self.races, TOTAL_RACES) + 1))
+
+    def _missed_bot(self, base, p):
+        """Points missing after `p` rejoined at 0, if a bot can have raced for them in races that weren't captured"""
+        per = POINTS_PER_RACE[self.lobby]
+        races = math.ceil(base / per)
+        missing = per * races - base
+        return missing if p["total_score"] > 0 and max(missing, p["total_score"]) <= 15 * (races - 1) else 0
 
     def _adds_up(self, base, unsure):
         """For each unsure place: did someone start over? The answer that makes the fewest races add up, if
@@ -507,7 +544,11 @@ class Session(CustomTags):
         self._suggest("comp11", "comp11",
                       f"Looks like an 11 player race. The usual correction is +3 for 1st ({first['name']}), "
                       f"+2 for 2nd ({second['name']}), +1 for everyone else and +1 for {missing}",
-                      "Add 15 points", adds)
+                      "Add 15 points", adds,
+                      done=f"11 player race, added 15 points: +3 for 1st ({first['name']}), +2 for 2nd "
+                           f"({second['name']}), +1 for everyone else and +1 for {missing}",
+                      # 15 points: did they miss the race, or rejoin and win?
+                      sure=idle[0] in away or idle[0]["total"] != 15)
 
     def _vote_teams(self, pairs):
         """Each place votes for the team its group belongs to (stand-ins don't vote)"""
@@ -578,12 +619,17 @@ class Session(CustomTags):
         return new == sorted(p["total"] for p in self.last_players)
 
     # suggestions and notes
-    def _suggest(self, sid, kind, text, button, adds):
+    def _suggest(self, sid, kind, text, button, adds, done="", sure=True, score=0):
+        team = {pl["id"]: pl["team"] for pl in self.places}
+        adds = [{"team": team.get(a.get("place")), **a} for a in adds]
         self.suggestions = [s for s in self.suggestions if s["id"] != sid]
-        self.suggestions.append({"id": sid, "kind": kind, "text": text, "button": button, "adds": adds})
+        self.suggestions.append({"id": sid, "kind": kind, "text": text, "button": button, "adds": adds,
+                                 "done": done, "sure": sure, "score": score})
+        if button:
+            self._offered.add(sid)
 
     def _tag(self, key):
-        if self.format == teams.FFA:            # the player's name, as it was read most often
+        if self.format == teams.FFA:
             pl = next((pl for pl in self.places if pl["team"] == key), None)
             if pl:
                 names = pl.get("names") or {pl["name"]: 1}
@@ -595,16 +641,45 @@ class Session(CustomTags):
         if not s or not s["button"]:
             return None
         self._push_undo(s["button"][0].lower() + s["button"][1:])
+        self._apply(s)
+        return s
+
+    def _apply(self, s):
         places = {pl["id"]: pl for pl in self.places}
         for add in s["adds"]:
             if "place" in add and add["place"] in places:
                 places[add["place"]]["carried"] += add["points"]
             else:
-                key = add["key"]
+                key = add.get("key") or add["team"]
+                if not key:
+                    continue
                 self.bank[key] = self.bank.get(key, 0) + add["points"]
                 self.display.setdefault(key, key)
-        self.suggestions = [x for x in self.suggestions if x["id"] != sid]
-        return s
+        self.suggestions = [x for x in self.suggestions if x["id"] != s["id"]]
+
+    def accept_corrections(self):
+        new = [s for s in self.suggestions if s["id"] in self._offered]
+        self._offered = set()
+        if not new or not all(s["sure"] for s in new) or not self._adds_up_with(new):
+            return []
+        board = (tuple(sorted(p["total"] for p in self.last_players)),
+                 tuple(sorted((s["kind"], a.get("key") or a["team"] or "", a["points"])
+                              for s in new for a in s["adds"])))
+        if board in self._declined:
+            return []
+        button = new[0]["button"]
+        self._push_undo(button[0].lower() + button[1:] if len(new) == 1 else f"{len(new)} corrections", auto=board)
+        for s in new:
+            self._apply(s)
+            self._suggest(f"auto:{s['id']}", "note", s["done"], None, [])
+        return new
+
+    def _adds_up_with(self, new):
+        per = POINTS_PER_RACE[self.lobby]
+        total = self.grand_total() + sum(a["points"] for s in new for a in s["adds"])
+        races = round((total - self._points_before) / per)
+        missing, missing_before = (t - per * round(t / per) for t in (total, self._points_before))
+        return missing in (0, missing_before) and all(s["score"] <= 15 * races for s in new)
 
     def dismiss_suggestion(self, sid):
         self.suggestions = [s for s in self.suggestions if s["id"] != sid]
@@ -669,7 +744,7 @@ class Session(CustomTags):
         mine = self.resolve_tag(my_tag)[1] if my_tag else None
         mine = mine if isinstance(mine, str) else None
         rows, above = [], None
-        board_order = {}                       # FFA: a tie keeps the game's order, as on the scoreboard
+        board_order = {}
         for pl in self.places:
             board_order[pl["team"]] = min(board_order.get(pl["team"], 99), pl["order"])
         tie = (lambda k: (board_order.get(k, 99), k)) if self.format == teams.FFA else (lambda k: (0, k))
@@ -693,7 +768,7 @@ class Session(CustomTags):
         first_chars = collections.Counter(label_of(r["tag"])[0] for r in rows)
         for r in rows:
             full = label_of(r["tag"])
-            r["short"] = full if first_chars[full[0]] > 1 else full[0]   # lounge: the first character is the team
+            r["short"] = full if first_chars[full[0]] > 1 else full[0]
             if self.format == teams.FFA:
                 r["short"] = r["tag"]
         return self._with_custom(rows)

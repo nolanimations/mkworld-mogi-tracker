@@ -59,7 +59,7 @@ class Controller:
                 "message": self.message,
                 "settings": {k: self.settings[k] for k in
                              ("source", "monitor", "my_tag", "mark_my_tag", "auto_copy", "auto_capture",
-                              "overlay_layout", "background", "player_points")},
+                              "auto_accept", "overlay_layout", "background", "player_points")},
                 "hotkey": {"combo": self.hotkey.combo, "recording": self.hotkey.recording},
                 "watching": {"on": self.watcher is not None, "error": self.watch_error},
                 "overlay_url": f"http://127.0.0.1:{self.port}/overlay",
@@ -207,6 +207,9 @@ class Controller:
             if auto and self.session.same_board(players):
                 return     # already captured
             self.session.apply_capture(players, tidy_board=tidy)
+            if self.settings["auto_accept"]:
+                for s in self.session.accept_corrections():
+                    log.info("auto-accepted: %s", s["done"])
             race = self.session.race_info()["number"]
         copied = self.settings["auto_copy"] and self._copy_scores()
         if len(players) < lobby:
@@ -390,8 +393,8 @@ class Controller:
         races = data.get("races")
         if isinstance(races, int) and not isinstance(races, bool) and settings.RACES[0] <= races <= settings.RACES[1]:
             self.session.races = self.settings["races"] = races
-        for key in ("source", "monitor", "my_tag", "mark_my_tag", "auto_copy", "auto_capture", "overlay_layout",
-                    "background", "player_points"):
+        for key in ("source", "monitor", "my_tag", "mark_my_tag", "auto_copy", "auto_capture", "auto_accept",
+                    "overlay_layout", "background", "player_points"):
             if key in data and (key not in settings.OPTIONS or data[key] in settings.OPTIONS[key]):
                 self.settings[key] = data[key]
         if "source" in data:

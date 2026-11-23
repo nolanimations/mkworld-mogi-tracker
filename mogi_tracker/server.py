@@ -181,7 +181,7 @@ def write_overlay_file(port):
     return path
 
 
-RUN = secrets.token_hex(4)   # this run of the app: an overlay that sees a new one reloads to get the current code
+RUN = secrets.token_hex(4)
 
 
 def _is_ours(port) -> bool:

@@ -136,7 +136,7 @@ def test_clipboard_keeps_full_tag_when_first_character_collides():
     s = Session(24, "4v4")
     s.bank = {"AB": 30, "AC": 20, "X1": 10, "Q": 5}
     s.display = {"AB": "Ab", "AC": "AC", "X1": "X1", "Q": "Queen"}
-    assert s.clipboard_text() == "AB 30 | AC 20 | X 10 | Q 5 | @11"     # lounge: the first character is the team
+    assert s.clipboard_text() == "AB 30 | AC 20 | X 10 | Q 5 | @11"
 
 
 def test_rejoin_at_zero_is_offered_once(s):

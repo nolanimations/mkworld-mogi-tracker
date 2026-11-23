@@ -59,6 +59,7 @@ The tracker keeps track of every spot in the room, so it should be able to handl
 | A player left the room | Their points keep counting for their team |
 | A bot raced in their place | The bot's points go to that player's team |
 | The player rejoins with 0 | What they (and the bot) had stays with their team |
+| You DC'd yourself and missed a race | App offers to bank your old points, plus the bot's if one raced for you. If it was an 11p race (12p only) you have to add the correction by hand |
 | 11p race | App offers to add the usual correction: +3 for 1st, +2 for 2nd, +1 for everyone else and the player who missed it |
 | The mogi started with 11 | An *open spot* on the team that's missing a player gets the +1s until a sub joins |
 
