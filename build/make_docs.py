@@ -86,10 +86,11 @@ def main():
     subprocess.run(base + ["--window-size=230,364", "--default-background-color=00000000",
                            f"--screenshot={docs / 'overlay-list.png'}", url + "/overlay?once&layout=list"], check=True, timeout=60)
     controller.close()
-    stale = [p.name for p in sorted(docs.glob("*.png")) if p.stat().st_mtime < started]
+    made = ["app.png", "app-blue.png", "app-light.png", "overlay.png", "overlay-list.png"]
+    stale = [n for n in made if not (docs / n).exists() or (docs / n).stat().st_mtime < started]
     if stale:
         raise SystemExit(f"the browser didn't write {stale}")
-    print("wrote", [p.name for p in sorted(docs.glob("*.png"))])
+    print("wrote", made)
 
 
 if __name__ == "__main__":

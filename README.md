@@ -89,6 +89,8 @@ it only changes the tag in the app, the OBS overlay and text output. Empty the b
 2. In OBS, add a **Browser** source, tick **Local file** and pick that file. Set the size to **1920 × 120** for the
    bar (horizontal) or **240 × 1080** for the list (vertical)
 
+![Overlay setup](docs/overlay-setup.png)
+
 I tested these for 1080p, but on a 1440p canvas 2560 × 160 or 320 × 1440 should work, on 4K double them, etc.
 
 Using the overlay **address** instead works too, but then you have to open the tracker before OBS, or the overlay will stay empty until
