@@ -430,7 +430,7 @@ def group_ffa(raw_data):
         key = upper_latin("".join(name.split()))
         seen[key] += 1
         out.append({"team_identifier": name if seen[key] == 1 else f"{name} {seen[key]}", "name": p.get("full_name", ""),
-                    "total_score": p["white_score"] + p["green_score"]})
+                    "total_score": p["white_score"] + p["green_score"], "finish": p.get("finish")})
     return out
 
 
@@ -528,6 +528,7 @@ def group_teams_first_char_primary(raw_data, team_format="4v4", lobby_size=24):
                 "team_identifier": player["final_team"],
                 "name": player["full_name"],
                 "total_score": total,
+                "finish": player.get("finish"),
             }
         )
 

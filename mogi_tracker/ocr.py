@@ -453,6 +453,17 @@ def is_complete(players, lobby_size):
     return lobby_size != 24 or not any(_gain_too_big(p) for p in players)
 
 
+RACE_ORDER = 0.7
+
+
+def to_players(merged):
+    fits = sum(p["gain"] == POINTS_TABLE_24[p["rank"] - 1] for p in merged)
+    race_order = bool(merged) and fits >= RACE_ORDER * len(merged)
+    ranks = collections.Counter(p["rank"] for p in merged)
+    return [{"full_name": p["name"], "white_score": p["total"], "green_score": p["gain"],
+             "finish": p["rank"] if race_order and ranks[p["rank"]] == 1 else None} for p in merged]
+
+
 def analyze(images, lobby_size=24):
     frames, merged, warnings, mode = [], [], [], TeamMode()
     for img in images:
@@ -472,7 +483,7 @@ def analyze(images, lobby_size=24):
     for w in warnings:
         log.warning(w)
     return {
-        "players": [{"full_name": p["name"], "white_score": p["total"], "green_score": p["gain"]} for p in merged],
+        "players": to_players(merged),
         "merged": merged,
         "warnings": warnings,
         "frames_read": len(frames),

@@ -4,7 +4,7 @@
   const $ = (id) => document.getElementById(id);
   const token = window.MKW_TOKEN;
   let state = null;
-  let selectedKey = null;       // clicked team row
+  const openKeys = new Set();   // teams that show their players
   let lastMessageId = -1;
   let fadeTimer = null;
   let pendingCreate = null;     // {tag, points} waiting for "create this team?"
@@ -151,11 +151,13 @@
     same: '<svg viewBox="0 0 26 26"><rect x="4" y="10" width="18" height="6.500" rx="2" fill="#5fd13c" stroke="#1d1613" stroke-width="2.4"/></svg>',
   };
 
+  const CHEVRON = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></svg>';
+
   function drawBoard() {
     const board = $("board");
     if (editingTag && state.teams.some((t) => t.key === editingTag)) return;   // redrawn when the edit ends
     const before = new Map([...board.querySelectorAll(".row")].map((r) => [r.dataset.key, r.getBoundingClientRect().top]));
-    if (!state.teams.some((t) => t.key === selectedKey)) selectedKey = null;
+    for (const key of openKeys) if (!state.teams.some((t) => t.key === key)) openKeys.delete(key);
     board.classList.toggle("dense", state.teams.length > 8);
 
     if (!state.teams.length) {
@@ -172,7 +174,8 @@
     }
 
     board.replaceChildren(...state.teams.map((t) => {
-      const row = el("div", "row" + (t.mine ? " mine" : "") + (t.key === selectedKey ? " selected" : ""));
+      const open = openKeys.has(t.key);
+      const row = el("div", "row" + (t.mine ? " mine" : "") + (open ? " open" : ""));
       row.dataset.key = t.key;
       const trend = el("span", "trend");
       if (t.trend) trend.innerHTML = TREND[t.trend];   // markup fix
@@ -191,10 +194,11 @@
       if (t.bank) members.append(el("span", "bank-chip", `bank ${t.bank > 0 ? "+" : ""}${t.bank}`));
       const shown = state.settings.player_points ? [...t.members].sort((a, b) => b.total - a.total) : t.members;
       shown.forEach((m, i) => {
-        if (state.format === "FFA") {           // the row is the player: only say when they were read differently
+        if (state.format === "FFA") {
           if (m.name !== t.tag) members.append(`read as ${m.name}`);
           return;
         }
+        if (open) return;
         if (i) members.append(", ");
         members.append(m.name);
         if (state.settings.player_points) members.append(" ", el("b", "pp", m.total));
@@ -209,9 +213,22 @@
         seam.title = `${t.gap} point${t.gap === 1 ? "" : "s"} behind ${state.teams[state.teams.indexOf(t) - 1].tag}`;
         row.append(seam);
       }
-      row.addEventListener("click", () => {
-        if (String(window.getSelection())) return;
-        selectTeam(t.key === selectedKey ? null : t);
+      const more = el("button", "more");
+      more.type = "button";
+      more.title = open ? "Hide players" : "Show players";
+      more.setAttribute("aria-label", `${more.title} of ${t.tag}`);
+      more.setAttribute("aria-expanded", String(open));
+      more.innerHTML = CHEVRON;
+      row.append(more);
+      if (open) row.append(details(t));
+      let waiting = null, selected = "";
+      const selecting = () => ![selected, ""].includes(String(window.getSelection()));
+      row.addEventListener("mousedown", () => { selected = String(window.getSelection()); });
+      row.addEventListener("click", (e) => {
+        clearTimeout(waiting);
+        if (selecting() || e.detail > 1 || e.target.closest(".details")) return;
+        if (e.target.closest(".tag")) waiting = setTimeout(() => { if (!selecting()) toggleTeam(t.key); }, 250);
+        else toggleTeam(t.key);
       });
       return row;
     }));
@@ -244,7 +261,10 @@
       done = true;
       editingTag = null;
       if (save) post("custom_tag", { key: t.key, tag: input.value });
-      else drawBoard();
+      else {
+        drawBoard();
+        post("typing", { on: false });   // the box is gone before its focusout gets out
+      }
     };
     input.addEventListener("input", () => { typed = true; });
     input.addEventListener("keydown", (e) => {
@@ -256,19 +276,66 @@
     input.addEventListener("click", (e) => e.stopPropagation());
   }
 
-  function selectTeam(team) {
-    selectedKey = team ? team.key : null;
-    for (const row of document.querySelectorAll(".row")) row.classList.toggle("selected", row.dataset.key === selectedKey);
-    if (team) {
-      $("adj-tag").value = team.tag;
-      $("adj-points").focus();
+  // player stats within a team
+  const ordinal = (n) => n + (n % 100 > 10 && n % 100 < 14 ? "th" : ["th", "st", "nd", "rd"][n % 10] || "th");
+  const signed = (n) => (n > 0 ? "+" : "") + n;
+
+  function details(t) {
+    const line = (pos, top, name, points) => {
+      const li = el("li");
+      li.append(el("span", "d-pos" + (top <= 3 ? " r" + top : ""), pos), el("span", "d-name", name), el("span", "d-pts", points));
+      return li;
+    };
+    const panel = (title, lines, empty) => {
+      const box = el("section", "panel");
+      box.append(el("h3", "", title));
+      if (empty) box.append(el("p", "", empty));
+      else {
+        const list = el("ol");
+        list.append(...lines);
+        box.append(list);
+      }
+      return box;
+    };
+    const nobody = t.members.length ? "" : "No players until the next capture";
+    const ffa = state.format === "FFA";
+    const box = el("div", "details" + (ffa ? " solo" : ""));
+    if (!ffa) {
+      const points = (m) => m.mogi ?? m.total;
+      const lines = [...t.members].sort((a, b) => points(b) - points(a))
+        .map((m) => line(m.rank ? ordinal(m.rank) : "", m.rank, m.name, points(m)));
+      const other = t.total - t.members.reduce((sum, m) => sum + points(m), 0);
+      if (other && !nobody) {
+        const li = line("", 0, "Other points", signed(other));
+        li.className = "other";
+        li.title = "Added by hand, or from the bank and not tied to a player";
+        lines.push(li);
+      }
+      box.append(panel("MOGI", lines, nobody));
     }
+    const known = state.teams.some((o) => o.members.some((m) => m.last));
+    const last = (m) => m.last ? m.last.from : 99;
+    box.append(panel("LAST RACE", [...t.members].sort((a, b) => last(a) - last(b)).map((m) => {
+      const name = ffa ? "" : m.name;
+      if (!m.last) return line("–", 99, name, "");
+      const { from, to, points } = m.last;
+      return line(from === to ? ordinal(from) : `${from}-${ordinal(to)}`, from, name, signed(points));
+    }), nobody || (known ? "" : "Can't tell, the race before it wasn't captured")));
+    return box;
+  }
+
+  function toggleTeam(key) {
+    if (!openKeys.delete(key)) openKeys.add(key);
+    drawBoard();
+    const row = [...document.querySelectorAll(".row.open")].find((r) => r.dataset.key === key);
+    if (!row) return;
+    row.querySelector(".details").classList.add("opening");
+    row.scrollIntoView({ block: "nearest" });
   }
 
   function clearAdjust() {
     $("adj-tag").value = "";
     $("adj-points").value = "";
-    selectTeam(null);
   }
 
   // dock
@@ -400,7 +467,7 @@
     else if (out.reason === "points") $("adj-points").select();
     else $("adj-tag").select();
   });
-  $("adj-tag").addEventListener("input", () => { if (selectedKey) selectTeam(null); pendingCreate = null; });
+  $("adj-tag").addEventListener("input", () => { pendingCreate = null; });
 
   // While typing here, the global hotkey must not start a capture
   document.addEventListener("focusin", (e) => { if (e.target.matches("input[type=text]")) post("typing", { on: true }); });

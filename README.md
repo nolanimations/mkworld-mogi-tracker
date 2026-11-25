@@ -46,7 +46,7 @@ Enable **Auto-capture** in settings and the app reads the scoreboard by itself a
 
 ### Adding points by hand
 
-Type a tag and a number in **Add points** or click a team to fill in its tag. Negative numbers subtract from a team
+Type a tag and a number in **Add points**. Negative numbers subtract from a team
 
 **Undo** undoes literally whatever you did last: capture, add points, a format change etc.
 
@@ -67,8 +67,10 @@ A small note tells you when the tracker did one of these by itself. All of this 
 if one was missed and a total suddenly dropped, the app offers to bank the missing points instead. Just add points by hand if
 you're unsure!
 
-Individual points are also sown, handy to check totals after a lotts of DCs. Turn off
+Individual points are also shown, handy to check totals after a lotts of DCs. Turn off
 **Show individual points** in settings if you don't need them
+
+It also shows team standings, clicking on a team will show the overall placements within the same team, and the spots they got last race
 
 ### My tag
 

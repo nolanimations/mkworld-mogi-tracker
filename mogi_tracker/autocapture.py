@@ -309,7 +309,7 @@ class _Read24:
             if stale >= STALE_FRAMES:
                 break
         self.end()
-        players = [{"full_name": p["name"], "white_score": p["total"], "green_score": p["gain"]} for p in merged]
+        players = ocr.to_players(merged)
         usable = self._usable(merged)
         log.info("auto-capture: 24p read %d players from %d of %d frames (usable=%s)",
                  len(merged), len(used), len(read), usable)

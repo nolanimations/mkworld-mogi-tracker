@@ -371,7 +371,7 @@ class Controller:
         elif out["tag"]:
             self.say(f"No team with the tag “{out['tag']}” yet", "bad")
         else:
-            self.say("Type a tag first, or click a team", "bad")
+            self.say("Type a tag first", "bad")
         return out
 
     def _do_suggestion(self, data):

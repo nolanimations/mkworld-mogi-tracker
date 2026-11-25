@@ -60,7 +60,7 @@
   }
 
   const SHUFFLE = { duration: 520, easing: "cubic-bezier(.2,.8,.2,1)" };
-  const PAGE = 8, PAGE_SECONDS = 5;   // FFA bar: full names need room, so at most 8 at a time (12p: 6 + 6)
+  const PAGE = 8, PAGE_SECONDS = 5;   // FFA bar
   const FLIP = { duration: 420, easing: "cubic-bezier(.2,.8,.2,1)", fill: "backwards" };
   let last = null, pageTimer = null, shownPage = null;
 
@@ -149,7 +149,7 @@
     stream.onerror = () => { stream.close(); setTimeout(reconnect, 3000); };
   }
 
-  // OBS keeps this page open across app restarts: after one (or an update) reload, so the overlay runs the new code
+  // OBS keeps this page open across app restarts
   let run = null;
   const ping = () => fetch("/api/ping", { cache: "no-store" }).then((r) => r.json()).then((p) => p.run);
   function reconnect() {
