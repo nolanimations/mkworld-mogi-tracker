@@ -292,7 +292,7 @@ class _Read24:
         read, used, merged, warnings, stale, mode = [], [], [], [], 0, ocr.TeamMode()
         for img in self._frames(read):
             team = mode.check(img, 24)
-            rows = ocr.read_frame(img, 24, team=team)
+            rows = ocr.read_frame(img, 24, team=team, only_with_gains=True)
             if mode.on:
                 used = [u for u in used if u[1]]
             if not rows or sum(1 for r in rows if r["gain"]) < WITH_GAINS * len(rows):

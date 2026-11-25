@@ -261,8 +261,7 @@ class Session(CustomTags):
 
     @staticmethod
     def _fit(pl, p):
-        """How well a board row fits a place. name likeness (1 for a known name), plus a little when the total did
-        not go down. An empty side (a row that gets a new place, a place nobody is in) fits 0"""
+        """How well a board row fits a place. name likeness (1 for a known name), plus a little when the total did not go down"""
         if pl is None or p is None:
             return 0
         pk = player_key(p["name"])
@@ -344,8 +343,6 @@ class Session(CustomTags):
         self._bring_over([pl for pl, _ in new])
         self._finishes(pairs, again)
         for pl, p in pairs:
-            # how the place's own player was read (FFA shows the usual one): readings like their first name only,
-            # so a bot that kept their points doesn't rename them
             if not pl["stand_in"] and _alike(player_key(p["name"]), pl["origin"]) >= MISREAD_ALIKE:
                 names = pl.setdefault("names", {})
                 names[p["name"]] = names.get(p["name"], 0) + 1
@@ -363,8 +360,6 @@ class Session(CustomTags):
         return len(drops) >= max(3, math.ceil(len(pairs) / 2))
 
     def _occupants(self, pairs, gone, tidy_board, first_seen=False):
-        """Work out who is in each place now, returns notes. `first_seen`: someone on the board got a place just now
-        (24p, not read before), so how much they gained this race is unknown"""
         notes = []
         if self.lobby == 12 and tidy_board and len(pairs) < 12:
             for pl in gone:
@@ -372,22 +367,22 @@ class Session(CustomTags):
                     pl["away"] = True
                     notes.append(f"{pl['name']} left the room. Their {_points(pl['total'])} still count for "
                                  f"{self._tag(pl['team'])}")
-        seen_all = all(pl["away"] for pl in gone)        # every known place is on the board (or away)
-        complete = seen_all and not first_seen            # every place's points this race are known
+        seen_all = all(pl["away"] for pl in gone)
+        complete = seen_all and not first_seen
 
-        fixed, drops, unsure, back = [], [], [], []       # fixed: (place, player, started_at_0)
-        own = {}                                          # place id: the row is the place's own player
+        fixed, drops, unsure, back = [], [], [], []       # fixed (place, player, started_at_0)
+        own = {}
         for pl, p in pairs:
             pk, new = player_key(p["name"]), p["total_score"]
             origin = self._is_origin(pl, pk)
             current = pk == pl["pk"] or _alike(pk, pl["pk"]) >= NAME_MATCH
             own[pl["id"]] = origin or (current and not pl["stand_in"])
             if pl["away"] and own[pl["id"]]:
-                fixed.append((pl, p, True))               # rejoin at 0
+                fixed.append((pl, p, True))               # rejoin
             elif origin and pl["stand_in"]:
-                back.append((pl, p))                      # back after a stand-in, or the "stand-in" was them misread
+                back.append((pl, p)) 
             elif current and new < pl["total"]:
-                drops.append((pl, p))                     # same name, lower total: uncaught DC or misread
+                drops.append((pl, p))                     # same name, lower total
             elif current:
                 fixed.append((pl, p, False))
             else:

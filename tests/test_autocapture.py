@@ -1,5 +1,6 @@
 import threading
 import numpy as np
+import pytest
 
 from mogi_tracker import autocapture, ocr
 from mogi_tracker.autocapture import ARMED, DONE, IDLE, READING, Detector, same_reads
@@ -163,7 +164,7 @@ def test_same_board_is_not_captured_twice():
 
 def _fake_ranks(monkeypatch, texts):
     """rank column reads `texts` top to bottom"""
-    monkeypatch.setattr(ocr, "row_tops", lambda img, lobby, team=None: [40 + 77 * k for k in range(len(texts))])
+    monkeypatch.setattr(ocr, "row_tops", lambda img, lobby, **kw: [40 + 77 * k for k in range(len(texts))])
 
     class Reader:
         def recognise(self, crops):
@@ -192,12 +193,29 @@ def test_24p_read_skips_frames_without_plus_points(monkeypatch):
     scroll = [row(r, f"P{r}", 0, ocr.POINTS_TABLE_24[r - 1]) for r in range(1, 25)]
     sorted_board = [row(r, f"P{25 - r}", r, 0) for r in range(1, 25)]
     frames = iter([sorted_board, scroll, sorted_board, scroll])
-    monkeypatch.setattr(ocr, "read_frame", lambda img, lobby, team=None: next(frames))
+    monkeypatch.setattr(ocr, "read_frame", lambda img, lobby, **kw: next(frames))
     job = autocapture._Read24([np.zeros((1080, 1920 - autocapture.KEEP_FROM_X, 3), np.uint8)] * 4)
     job.end()
     out = job.run()
     assert "missed" not in out and len(out["players"]) == 24
     assert {p["full_name"]: p["white_score"] + p["green_score"] for p in out["players"]}["P1"] == 15
+
+
+@pytest.mark.parametrize("gain, reads, rows", [("", 1, 0), ("+12", 2, 12), ("12", 2, 12)])
+def test_24p_frame_without_plus_points_is_only_read_for_those(monkeypatch, gain, reads, rows):
+    calls = []
+
+    class Reader:
+        def recognise(self, crops):
+            calls.append(len(crops))
+            return [(gain if len(calls) == 1 else "7", 0.9)] * len(crops)
+    monkeypatch.setattr(ocr, "get_reader", lambda: Reader())
+    monkeypatch.setattr(ocr, "row_tops", lambda img, lobby: [40 + 77 * k for k in range(12)])
+    frame = np.zeros((1080, 1920, 3), np.uint8)
+    assert len(ocr.read_frame(frame, 24, only_with_gains=True)) == rows
+    assert len(calls) == reads and calls[0] == 12
+    calls.clear()
+    assert len(ocr.read_frame(frame, 24)) == 12 and len(calls) == 2        # manual capture reads everything
 
 
 def test_24p_read_with_a_misread_total_is_a_miss_not_wrong_scores(monkeypatch):
@@ -206,12 +224,12 @@ def test_24p_read_with_a_misread_total_is_a_miss_not_wrong_scores(monkeypatch):
                 "top": rank * 77, "ti": rank}
     good = [row(r, 30) for r in range(1, 25)]
     misread = [row(r, 30) for r in range(1, 24)] + [row(24, 3)]
-    monkeypatch.setattr(ocr, "read_frame", lambda img, lobby, team=None: misread)
+    monkeypatch.setattr(ocr, "read_frame", lambda img, lobby, **kw: misread)
     job = autocapture._Read24([np.zeros((1080, 1920 - autocapture.KEEP_FROM_X, 3), np.uint8)])
     job.end()
     assert job.run()["missed"]
     frames = iter([misread, good, good])
-    monkeypatch.setattr(ocr, "read_frame", lambda img, lobby, team=None: next(frames))
+    monkeypatch.setattr(ocr, "read_frame", lambda img, lobby, **kw: next(frames))
     job = autocapture._Read24([np.zeros((1080, 1920 - autocapture.KEEP_FROM_X, 3), np.uint8)] * 3)
     job.end()
     out = job.run()
@@ -222,7 +240,7 @@ def test_24p_read_with_a_misread_total_is_a_miss_not_wrong_scores(monkeypatch):
 def test_24p_board_with_a_rejoined_player_is_fine(monkeypatch):
     rows = [{"rank": r, "name": f"P{r}", "total": 0 if r == 14 else 40, "gain": ocr.POINTS_TABLE_24[r - 1],
              "conf": 0.9, "top": r * 77, "ti": r} for r in range(1, 25)]
-    monkeypatch.setattr(ocr, "read_frame", lambda img, lobby, team=None: rows)
+    monkeypatch.setattr(ocr, "read_frame", lambda img, lobby, **kw: rows)
     job = autocapture._Read24([np.zeros((1080, 1920 - autocapture.KEEP_FROM_X, 3), np.uint8)] * 2)
     job.end()
     assert "missed" not in job.run()
@@ -234,7 +252,7 @@ def test_24p_frames_where_points_are_being_added_are_left_out(monkeypatch):
     scroll = [row(r, f"P{r}", 10, ocr.POINTS_TABLE_24[r - 1]) for r in range(1, 25)]
     resorting = [row(r, f"P{25 - r}", 50, 3 if r < 4 else 0) for r in range(1, 25)]
     frames = iter([scroll, resorting, resorting, scroll])
-    monkeypatch.setattr(ocr, "read_frame", lambda img, lobby, team=None: next(frames))
+    monkeypatch.setattr(ocr, "read_frame", lambda img, lobby, **kw: next(frames))
     job = autocapture._Read24([np.zeros((1080, 1920 - autocapture.KEEP_FROM_X, 3), np.uint8)] * 4)
     job.end()
     out = job.run()
@@ -250,7 +268,7 @@ def test_24p_own_row_pinned_at_the_bottom_is_no_tie(monkeypatch):
     bottom = [row(r, r) for r in range(6, 19)] + [row(18, 14)]
     rest = [row(r, r) for r in range(12, 25)]
     frames = iter([top, bottom, rest, top, bottom, rest])
-    monkeypatch.setattr(ocr, "read_frame", lambda img, lobby, team=None: next(frames))
+    monkeypatch.setattr(ocr, "read_frame", lambda img, lobby, **kw: next(frames))
     job = autocapture._Read24([np.zeros((1080, 1920 - autocapture.KEEP_FROM_X, 3), np.uint8)] * 6)
     job.end()
     out = job.run()
@@ -276,7 +294,7 @@ def test_24p_team_board_drops_reads_from_before_it_was_recognised(monkeypatch):
     good = [row(r, 30) for r in range(1, 25)]
     reads = iter([(garbage, False), (garbage, False), (good, True), (good, True)])
 
-    def read_frame(img, lobby, team=None):
+    def read_frame(img, lobby, team, **kw):
         rows, team_board = next(reads)
         assert team == team_board
         return rows

@@ -1,14 +1,16 @@
 """Leaderboard OCR with a small recognizer trained on synthetic Mario Kart World leaderboard text.
 
 No vision-language model: every row's fields (rank / name / +N / total) are cropped at fixed columns and read by
-a ~22 MB text recognizer (ONNX, CPU). It never has to be told where a leaderboard is scrolled
+a ~8 MB text recognizer (ONNX, CPU). It never has to be told where a leaderboard is scrolled
 to, because rows are located per frame, then identified by their printed rank, so frames taken at any
 scroll offset can merge. The recognizer was trained only on synthetic text, no game files are part of this repo.
 
 Coordinates below are 1920x1080-normalised.
 """
 import collections
+import concurrent.futures
 import difflib
+import functools
 import logging
 import math
 import os
@@ -47,7 +49,7 @@ _reader = None
 
 # Recognizer
 class Reader:
-    """Batch recognizer over BGR field crops: recognise(crops) -> [(text, confidence)]."""
+    """Recognizer over BGR field crops: recognise(crops) -> [(text, confidence)]"""
 
     def __init__(self, model_dir):
         import onnxruntime as ort
@@ -62,10 +64,11 @@ class Reader:
                 model = modelpack.unpack(f.read())
         else:
             raise FileNotFoundError(
-                "OCR model not found (mogi_tracker/model/rec.onnx). It is not part of the source code, "
+                "OCR model not found (mogi_tracker/model/rec.onnx). It's not part of the source code, "
                 "see 'The OCR model' in the README.")
         opts = ort.SessionOptions()
-        opts.intra_op_num_threads = max(1, min(8, (os.cpu_count() or 4) // 2))
+        opts.intra_op_num_threads = 1
+        self.pool = concurrent.futures.ThreadPoolExecutor(max(1, min(8, (os.cpu_count() or 4) // 2)), "ocr")
         self.session = ort.InferenceSession(model, opts, providers=["CPUExecutionProvider"])
         self.input_name = self.session.get_inputs()[0].name
         with open(os.path.join(model_dir, "dict.txt"), encoding="utf-8") as f:
@@ -82,19 +85,17 @@ class Reader:
         out[:, :, :rw] = (img - 0.5) / 0.5
         return out
 
-    def recognise(self, crops, batch=8):
-        results = []
-        for i in range(0, len(crops), batch):
-            x = np.stack([self._prepare(c) for c in crops[i:i + batch]])
-            probs = self.session.run(None, {self.input_name: x})[0]
-            idx, conf = probs.argmax(axis=2), probs.max(axis=2)
-            for row_idx, row_conf in zip(idx, conf):
-                keep = np.ones(len(row_idx), bool)
-                keep[1:] = row_idx[1:] != row_idx[:-1]
-                keep &= row_idx != 0
-                text = "".join(self.classes[j] for j in row_idx[keep])
-                results.append((text, float(row_conf[keep].mean()) if keep.any() else 0.0))
-        return results
+    def _read(self, crop):
+        probs = self.session.run(None, {self.input_name: self._prepare(crop)[None]})[0][0]
+        idx, conf = probs.argmax(axis=1), probs.max(axis=1)
+        keep = np.ones(len(idx), bool)
+        keep[1:] = idx[1:] != idx[:-1]
+        keep &= idx != 0
+        text = "".join(self.classes[j] for j in idx[keep])
+        return text, float(conf[keep].mean()) if keep.any() else 0.0
+
+    def recognise(self, crops):
+        return list(self.pool.map(self._read, crops))
 
 
 def get_reader():
@@ -121,17 +122,24 @@ def to_bgr(img):
 
 
 def comb_phase(img, lo=76.9, hi=77.1):
-    g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.float32)
-    sig = np.concatenate([np.median(np.abs(np.diff(g[:, 1075:1900], axis=0)), axis=1), [0]])
+    g = cv2.cvtColor(img[:, 1075:1900], cv2.COLOR_BGR2GRAY).astype(np.float32)
+    sig = np.concatenate([np.median(np.abs(np.diff(g, axis=0)), axis=1), [0]])
     best = (-1.0, ROW_PITCH, 0.0)
+    for pitch, phase, idx in _combs(len(sig), lo, hi):
+        s = sig[idx].mean()
+        if s > best[0]:
+            best = (s, pitch, phase)
+    return best[1], best[2], best[0] / max(float(np.mean(sig)), 1e-6)
+
+
+@functools.lru_cache(maxsize=4)
+def _combs(length, lo, hi):
+    out = []
     for pitch in np.arange(lo, hi + 1e-6, 0.05):
         for phase in np.arange(0, pitch, 0.5):
-            idx = np.round(np.arange(phase, len(sig), pitch)).astype(int)
-            idx = idx[idx < len(sig)]
-            s = sig[idx].mean()
-            if s > best[0]:
-                best = (s, pitch, phase)
-    return best[1], best[2], best[0] / max(float(np.mean(sig)), 1e-6)
+            idx = np.round(np.arange(phase, length, pitch)).astype(int)
+            out.append((pitch, phase, idx[idx < length]))
+    return out
 
 
 _BOARD_PITCHES = np.arange(76.9, 77.1 + 1e-6, 0.05)
@@ -307,7 +315,7 @@ def parse_int(text, signed=False):
 
 
 # One frame
-def read_frame(img, lobby=24, gains=False, team=None):
+def read_frame(img, lobby=24, gains=False, team=None, only_with_gains=False):
     """gains: 12p reads the +N column too, so a board that is still adding points gives the final totals
     (24p always does). team: read as a team board (None: this frame decides by itself)"""
     img = to_bgr(img)
@@ -316,13 +324,22 @@ def read_frame(img, lobby=24, gains=False, team=None):
     tops = row_tops(img, lobby)
     if team is None:
         team = team_board(img, tops)
-    kinds = ["name", "total"] + (["gain", "rank"] if lobby == 24 else ["gain"] if gains else [])
-    jobs = [(ti, kind, crop_field(img, kind, top, team)) for ti, top in enumerate(tops) for kind in kinds]
-    jobs = [(ti, kind, c) for ti, kind, c in jobs if c is not None]
-    reads = get_reader().recognise([c for _, _, c in jobs]) if jobs else []
     per_row = collections.defaultdict(dict)
-    for (ti, kind, _), read in zip(jobs, reads):
-        per_row[ti][kind] = read
+
+    def read_fields(kinds):
+        jobs = [(ti, kind, crop_field(img, kind, top, team)) for ti, top in enumerate(tops) for kind in kinds]
+        jobs = [(ti, kind, c) for ti, kind, c in jobs if c is not None]
+        reads = get_reader().recognise([c for _, _, c in jobs]) if jobs else []
+        for (ti, kind, _), read in zip(jobs, reads):
+            per_row[ti][kind] = read
+
+    if lobby == 24:
+        read_fields(["gain"])
+        if only_with_gains and not any(parse_int(f["gain"][0], signed=True) for f in per_row.values()):
+            return []
+        read_fields(["name", "total", "rank"])
+    else:
+        read_fields(["name", "total"] + (["gain"] if gains else []))
 
     rows = []
     for ti, top in enumerate(tops):

@@ -42,7 +42,7 @@ Enable **Auto-capture** in settings and the app reads the scoreboard by itself a
 - Auto-capture is likely to miss a race every now and then, so keep taking screenshots of the results
   (or make a clip in 24p)
 - Also works in team mode if you really want it to
-- Auto-capture very very slow. A 24p race can take over 25 seconds to process
+- Manual capture will always be faster than auto-capture, keep that in mind when enabling it. A 24p race can take over 10 seconds to auto-capture
 
 ### Adding points by hand
 
