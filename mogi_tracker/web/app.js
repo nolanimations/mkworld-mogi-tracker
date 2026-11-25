@@ -83,7 +83,7 @@
     const items = [];
     if (state.updated) {
       const n = el("div", "notice note");
-      n.append(el("p", "", `Succesfully updated to${state.version}`));
+      n.append(el("p", "", `Successfully updated to ${state.version}`));
       const log = el("button", "pill-btn gold", "See changelog");
       log.addEventListener("click", () => post("changelog"));
       const ok = el("button", "pill-btn ghost", "OK");

@@ -1,7 +1,7 @@
 """Leaderboard OCR with a small recognizer trained on synthetic Mario Kart World leaderboard text.
 
 No vision-language model: every row's fields (rank / name / +N / total) are cropped at fixed columns and read by
-a ~8 MB text recognizer (ONNX, CPU). It never has to be told where a leaderboard is scrolled
+an ~8 MB text recognizer (ONNX, CPU). It never has to be told where a leaderboard is scrolled
 to, because rows are located per frame, then identified by their printed rank, so frames taken at any
 scroll offset can merge. The recognizer was trained only on synthetic text, no game files are part of this repo.
 
