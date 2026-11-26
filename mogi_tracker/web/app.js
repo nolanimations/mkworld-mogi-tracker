@@ -379,14 +379,26 @@
   function drawSettings() {
     const s = state.settings;
     drawSeg("seg-source", [["monitor", "Screen"], ["obs", "OBS Virtual Camera"]], s.source, (v) => post("settings", { source: v }));
+    const other = el("button", "", "Other ▾");
+    other.type = "button";
+    other.setAttribute("aria-pressed", String(s.source === "camera"));
+    other.setAttribute("aria-haspopup", "menu");
+    other.setAttribute("aria-expanded", String(!$("camera-menu").hidden));
+    other.title = s.source === "camera" && s.camera ? s.camera : "A capture card or another camera device";
+    other.addEventListener("click", (e) => { e.stopPropagation(); openCameraMenu($("camera-menu").hidden); });
+    $("seg-source").append(other);
     const mon = $("seg-monitor");
     mon.hidden = s.source !== "monitor" || monitors.length < 2;
     if (!mon.hidden) {
       drawSeg("seg-monitor", monitors.map((m) => [m.index, `${m.index}  (${m.width}×${m.height})`]), s.monitor, (v) => post("settings", { monitor: v }));
     }
+    const size = state.camera_size ? ` (${state.camera_size[0]}×${state.camera_size[1]})` : "";
     $("source-hint").textContent = s.source === "obs"
       ? "Press Start Virtual Camera in OBS first"
-      : "Game should always be fullscreen";
+      : s.source === "camera"
+        ? (s.camera ? `${s.camera}${size} is active. ` : "Pick a camera under Other ") +
+          "Most capture cards only work with one program at a time, so if you want to use OBS for example, use Virtual Camera instead"
+        : "Game should always be fullscreen";
 
     const hk = state.hotkey;
     $("hotkey-cap").textContent = hk.recording ? "…" : hk.combo ? prettyKey(hk.combo) : "none";
@@ -408,9 +420,33 @@
     $("credits").textContent = `MKWorld Mogi Tracker ${state.version}. Racers Delight font by @ImWhoreHay, M PLUS 1p by the M+ Project. Text recognition built on PaddleOCR (Apache License 2.0). Not affiliated with Nintendo.`;
   }
 
+  // Other capture source
+  async function openCameraMenu(open) {
+    const menu = $("camera-menu");
+    menu.hidden = !open;
+    if (state) drawSettings();
+    if (!open) return;
+    menu.replaceChildren(el("p", "menu-note", "Looking for cameras…"));
+    const out = await post("cameras");
+    if (menu.hidden) return;
+    const names = out.cameras || [];
+    menu.replaceChildren(...names.map((name) => {
+      const item = el("button", "menu-item", name);
+      item.type = "button";
+      item.setAttribute("role", "menuitemradio");
+      const on = state.settings.source === "camera" && state.settings.camera === name;
+      item.setAttribute("aria-checked", String(on));
+      item.addEventListener("click", () => { openCameraMenu(false); post("settings", { source: "camera", camera: name }); });
+      return item;
+    }));
+    if (!names.length) menu.append(el("p", "menu-note", out.error || "No cameras found. Is your device plugged in?"));
+    menu.querySelector(".menu-item")?.focus();
+  }
+
   function openDrawer(open) {
     $("drawer").hidden = !open;
     $("scrim").hidden = !open;
+    if (!open) $("camera-menu").hidden = true;
     if (open) post("monitors").then((out) => { monitors = out.monitors || []; if (state) drawSettings(); });
   }
 
@@ -478,7 +514,12 @@
   $("btn-settings").addEventListener("click", () => openDrawer(true));
   $("btn-close").addEventListener("click", () => openDrawer(false));
   $("scrim").addEventListener("click", () => openDrawer(false));
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !state?.hotkey.recording) openDrawer(false); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || state?.hotkey.recording) return;
+    if (!$("camera-menu").hidden) openCameraMenu(false);
+    else openDrawer(false);
+  });
+  document.addEventListener("click", (e) => { if (!$("camera-menu").hidden && !e.target.closest("#camera-menu")) openCameraMenu(false); });
   $("btn-hotkey").addEventListener("click", () => post("hotkey"));
   $("btn-hotkey-clear").addEventListener("click", () => post("hotkey", { clear: true }));
   $("my-tag").addEventListener("change", (e) => post("settings", { my_tag: e.target.value }));

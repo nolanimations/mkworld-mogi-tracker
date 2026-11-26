@@ -138,8 +138,8 @@ def _full(kept):
 
 class Watcher:
 
-    def __init__(self, source, monitor, lobby, begin, result, error):
-        self.source, self.monitor, self.lobby = source, monitor, lobby
+    def __init__(self, source, monitor, lobby, begin, result, error, camera=""):
+        self.source, self.monitor, self.camera, self.lobby = source, monitor, camera, lobby
         self._begin, self._result, self._error = begin, result, error
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="autocapture", daemon=True)
@@ -161,7 +161,7 @@ class Watcher:
 
     # loop
     def _run(self):
-        feed = capture.Feed(self.source, self.monitor)
+        feed = capture.Feed(self.source, self.monitor, self.camera)
         det = Detector()
         kept = []
         lookback = collections.deque(maxlen=max(1, round(LOOKBACK_SECONDS * IDLE_RATE)))

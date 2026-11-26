@@ -9,6 +9,7 @@ DEFAULTS = {
     "races": 12,                 # races per mogi
     "source": "monitor",
     "monitor": 1,                # 1 = primary
+    "camera": "",
     "hotkey": "down",
     "my_tag": "",
     "mark_my_tag": True,
@@ -24,7 +25,7 @@ DEFAULTS = {
 }
 OPTIONS = {
     "lobby": teams.LOBBY_SIZES,
-    "source": ("monitor", "obs"),
+    "source": ("monitor", "obs", "camera"),
     "overlay_layout": ("bar", "list"),
     "background": ("dark", "blue", "light"),
     "scoring": ("places", "classic"),

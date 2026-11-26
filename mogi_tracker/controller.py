@@ -17,6 +17,7 @@ from . import session as places_session, session_classic
 log = logging.getLogger(__name__)
 
 MIN_SHARE = 2   # a capture counts only if at least 1/MIN_SHARE of the room was read
+LOW_RES = 1080  # a camera picture under this many lines: 24p tends to fail (720p recordings did)
 
 
 class Controller:
@@ -58,10 +59,11 @@ class Controller:
                 "cancelling": self.busy and self.cancelled,
                 "message": self.message,
                 "settings": {k: self.settings[k] for k in
-                             ("source", "monitor", "my_tag", "mark_my_tag", "auto_copy", "auto_capture",
+                             ("source", "monitor", "camera", "my_tag", "mark_my_tag", "auto_copy", "auto_capture",
                               "auto_accept", "overlay_layout", "background", "player_points")},
                 "hotkey": {"combo": self.hotkey.combo, "recording": self.hotkey.recording},
                 "watching": {"on": self.watcher is not None, "error": self.watch_error},
+                "camera_size": capture.camera_size(),
                 "overlay_url": f"http://127.0.0.1:{self.port}/overlay",
                 "overlay_file": self.overlay_file,
                 "version": __version__,
@@ -171,7 +173,7 @@ class Controller:
 
             def taken():
                 for frame in capture.stream(self.settings["source"], 1 if lobby == 12 else capture.BURST_COUNT,
-                                            self.settings["monitor"]):
+                                            self.settings["monitor"], self.settings["camera"]):
                     if self.cancelled:
                         return
                     frames.append(frame)
@@ -237,14 +239,14 @@ class Controller:
     # auto-capture
     def _sync_watcher(self):
         want = self.settings["auto_capture"]
-        source = (self.settings["source"], self.settings["monitor"])
+        source = (self.settings["source"], self.settings["monitor"], self.settings["camera"])
         if self.watcher and (not want or source != self._watch_source):
             self.watcher.stop()
             self.watcher, self.watch_error = None, ""
         if want and not self.watcher:
             self._watch_source = source
-            self.watcher = autocapture.Watcher(*source, lambda: self.session.lobby, self._auto_begin,
-                                               self._auto_result, self._auto_error).start()
+            self.watcher = autocapture.Watcher(*source[:2], lambda: self.session.lobby, self._auto_begin,
+                                               self._auto_result, self._auto_error, camera=source[2]).start()
 
     def _auto_begin(self):
         with self.lock:
@@ -393,14 +395,37 @@ class Controller:
         races = data.get("races")
         if isinstance(races, int) and not isinstance(races, bool) and settings.RACES[0] <= races <= settings.RACES[1]:
             self.session.races = self.settings["races"] = races
-        for key in ("source", "monitor", "my_tag", "mark_my_tag", "auto_copy", "auto_capture", "auto_accept",
+        before = (self.settings["source"], self.settings["camera"])
+        for key in ("source", "monitor", "camera", "my_tag", "mark_my_tag", "auto_copy", "auto_capture", "auto_accept",
                     "overlay_layout", "background", "player_points"):
             if key in data and (key not in settings.OPTIONS or data[key] in settings.OPTIONS[key]):
                 self.settings[key] = data[key]
-        if "source" in data:
+        if (self.settings["source"], self.settings["camera"]) != before:
             capture.release()
+            if self.settings["source"] == "camera":
+                threading.Thread(target=self._check_camera, args=(self.settings["camera"],), daemon=True).start()
         self._save_settings()
         self._sync_watcher()
+
+    def _check_camera(self, camera):
+        """Open a camera right away in case of errors, this way they won't pop up after a capture"""
+        try:
+            w, h = capture.check_camera("camera", camera)
+        except capture.CaptureError as e:
+            text, tone = str(e), "bad"
+        except Exception as e:
+            log.exception("checking %s failed", camera)
+            text, tone = f"Could not use {camera}: {e}", "bad"
+        else:
+            text, tone = f"{camera} works ({w}×{h})", "good"
+            if h < LOW_RES:
+                text, tone = (f"{camera} sends {w}×{h}. Fine for 12p, but 24p will probably fail. "
+                              "Set your card (or console) to 1080p"), "bad"
+        log.info("camera check: %s", text)
+        with self.lock:
+            if (self.settings["source"], self.settings["camera"]) == ("camera", camera):
+                self.say(text, tone)
+        self.changed()
 
     def _do_hotkey(self, data):
         if data.get("clear"):
@@ -426,6 +451,12 @@ class Controller:
         for name in ("THIRD_PARTY_NOTICES.txt", "LICENSE"):
             if (root / name).is_file():
                 os.startfile(root / name)   # noqa S606
+
+    def _do_cameras(self, _):
+        try:
+            return {"ok": True, "cameras": capture.cameras()}
+        except capture.CaptureError as e:
+            return {"ok": False, "error": str(e), "cameras": []}
 
     def _do_monitors(self, _):
         try:

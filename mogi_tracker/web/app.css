@@ -478,6 +478,20 @@ kbd {
 .credits .beta { margin-bottom: 6px; font-size: 12.5px; font-weight: 700; color: var(--drawer-text); }
 .link-btn { border: 0; padding: 0; background: none; color: var(--drawer-muted); font-size: inherit; text-decoration: underline; }
 .link-btn:hover { color: var(--drawer-text); }
+.source-pick { position: relative; align-self: stretch; }
+.source-pick .seg button { flex: 1 1 auto; white-space: nowrap; padding: 6px 10px; }
+.menu {
+  position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 2; max-height: 260px; overflow-y: auto;
+  display: flex; flex-direction: column; padding: 5px; border-radius: 16px;
+  background: var(--drawer-bg); box-shadow: inset 0 0 0 1.5px var(--drawer-line), 0 10px 28px rgba(0, 0, 0, 0.3);
+}
+.menu-item {
+  border: 0; padding: 8px 12px 8px 30px; border-radius: 11px; text-align: left; font-size: 13px; font-weight: 600;
+  background: transparent; color: var(--drawer-text); position: relative;
+}
+.menu-item:hover, .menu-item:focus-visible { background: var(--drawer-line); outline: 0; }
+.menu-item[aria-checked="true"]::before { content: "✓"; position: absolute; left: 11px; color: var(--accent); font-weight: 800; }
+.menu-note { margin: 0; padding: 8px 12px; font-size: 12.5px; color: var(--drawer-muted); }
 .drawer .seg { background: var(--drawer-seg); box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
 .drawer .seg button { color: var(--drawer-muted); }
 .drawer .seg button:hover { color: var(--drawer-text); background: var(--drawer-line); }

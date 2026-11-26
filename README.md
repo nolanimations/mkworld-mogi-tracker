@@ -25,12 +25,15 @@ Mario Kart World HAS to be 16:9 fullscreen for this tracker to work at all!
    - **Screen** takes a screenshot, and the game has to be fullscreen
    - **OBS Virtual Camera** reads your OBS (for capture cards) all you have to do is press *Start Virtual
      Camera* in OBS (make sure no stream overlay stuff is blocking the scoreboard)
+   - **Other** can read from a capture card (or any camera device) directly. Altough, **most capture cards only work with one
+     program at a time**, so if you're already gonna use OBS for something, use Virtual Camera instead
 3. When the results appear after a race, press **Capture** or the hotkey
    - **24p:** capture the *moment* the scoreboard starts moving. All the points get read while it moves
    - **12p:** capture once the scoreboard finishes adding points like usual
 4. Also has a text output that you can share: `A 124 | B 73 | C 67 | @8`
 
-> IMPORTANT: Make sure that you either set your OBS Virtual Camera source directly to your capture card, or that there's no stream overlay stuff covering the scoreboard!
+> [!IMPORTANT]
+> Make sure that you either set your OBS Virtual Camera source directly to your capture card, or that there's no stream overlay stuff covering the scoreboard!
 
 ### Auto-capture
 
