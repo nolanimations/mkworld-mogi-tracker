@@ -6,6 +6,8 @@ from . import paths, teams
 DEFAULTS = {
     "lobby": 24,
     "format": "4v4",
+    "auto_lobby": False, 
+    "auto_format": False,
     "races": 12,                 # races per mogi
     "source": "monitor",
     "monitor": 1,                # 1 = primary
@@ -15,13 +17,13 @@ DEFAULTS = {
     "mark_my_tag": True,
     "auto_copy": False,
     "auto_capture": False,
-    "auto_accept": False,        # apply point corrections without asking, if the points add up
+    "auto_accept": False,        # apply point corrections without asking if the points add up
     "overlay_layout": "bar",
     "background": "dark",
-    "player_points": True,       # each player's points next to their name in the team rows
+    "player_points": True,
     "port": 12424,
-    "last_version": "",          # the version that ran last, for the "Update successful" notice
-    "scoring": "places",         # "classic": the old DC logic (session_classic.py), only set by hand in settings.json
+    "last_version": "",          # for the "Update successful" notice
+    "scoring": "places",
 }
 OPTIONS = {
     "lobby": teams.LOBBY_SIZES,

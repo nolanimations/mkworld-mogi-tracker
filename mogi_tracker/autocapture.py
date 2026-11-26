@@ -122,12 +122,18 @@ def _keep(part):
     return cv2.resize(np.ascontiguousarray(part), size, interpolation=cv2.INTER_AREA)
 
 
-def _is_board(kept):
-    picks = []
+def _board_ranks(kept, every=False):
+    picks, found = [], []
     for k in (len(kept) - 1, len(kept) // 2, 0)[:RANK_TRIES]:
         if 0 <= k < len(kept) and k not in picks:
             picks.append(k)
-    return any(ocr.ranks_in_order(_full(kept[k])) for k in picks)
+    for k in picks:
+        ranks = ocr.board_ranks(_full(kept[k]))
+        if ocr.ranks_in_order(ranks=ranks):
+            found.append(ranks)
+            if not every:
+                break
+    return found
 
 
 def _full(kept):
@@ -214,10 +220,12 @@ class Watcher:
 
     def _start_job(self, det, kept, frame):
         lobby = self.lobby()
-        if not _is_board(kept or [k for k in (_keep(frame),) if k is not None]):
+        reads = _board_ranks(kept or [k for k in (_keep(frame),) if k is not None], every=lobby is None)
+        if not reads:
             log.info("auto-capture: looks like a scoreboard, but no ranks in order")
             det.finish()
             return
+        lobby = lobby or max(ocr.lobby_of(ranks) for ranks in reads)
         if not self._begin():
             det.finish()
             return

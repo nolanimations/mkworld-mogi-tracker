@@ -4,13 +4,13 @@
   const $ = (id) => document.getElementById(id);
   const token = window.MKW_TOKEN;
   let state = null;
-  const openKeys = new Set();   // teams that show their players
+  const openKeys = new Set();
   let lastMessageId = -1;
   let fadeTimer = null;
   let pendingCreate = null;     // {tag, points} waiting for "create this team?"
   let laterUpdate = null;
   let captureHover = false;
-  let editingTag = null;        // key of the team whose tag is being edited (the board waits with redrawing)
+  let editingTag = null;
   const TAG_MAX = 10;           // session.CUSTOM_TAG_MAX
   const PENCIL = '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M3 17.25V21h3.75L17.8 9.94l-3.75-3.75L3 17.25zm17.7-10.2a1 1 0 0 0 0-1.42l-2.33-2.33a1 1 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';   // the version the user said "Later" to
 
@@ -45,6 +45,29 @@
       b.type = "button";
       b.setAttribute("aria-pressed", String(value === current));
       b.addEventListener("click", () => value !== current && onPick(value));
+      return b;
+    }));
+  }
+
+  // Players and Format: Auto first
+  function drawAutoSeg(id, options, current, auto, decided, autoTitle, onPick) {
+    const box = $(id);
+    box.classList.toggle("is-auto", auto);
+    const autoBtn = el("button", "auto-pill", "Auto");
+    autoBtn.type = "button";
+    autoBtn.title = autoTitle;
+    autoBtn.setAttribute("aria-pressed", String(auto));
+    autoBtn.addEventListener("click", () => onPick("auto"));
+    box.replaceChildren(autoBtn, ...options.map(([value, label]) => {
+      const b = el("button", "", label);
+      b.type = "button";
+      const inUse = value === current;
+      b.setAttribute("aria-pressed", String(inUse && !auto));
+      if (auto && inUse) {
+        b.classList.add(decided ? "auto-pick" : "auto-guess");
+        b.title = decided ? "Picked by Auto" : "In use until Auto can tell";
+      }
+      b.addEventListener("click", () => (auto || !inUse) && onPick(value));
       return b;
     }));
   }
@@ -119,7 +142,12 @@
       n.append(yes, no);
       items.push(n);
     }
-    if (state.format_hint) {
+    if (state.settings.auto_format && state.captured && !state.format_auto) {
+      const n = el("div", "notice");
+      n.append(el("p", "", `Auto can't tell the format from these tags yet, currently using ${state.format}` +
+        "Let it try again next race, or pick a format manually"));
+      items.push(n);
+    } else if (state.format_hint && !state.settings.auto_format) {
       const n = el("div", "notice");
       n.append(el("p", "", `This looks like a ${state.format_hint} mogi, but ${state.format} is selected.`));
       const b = el("button", "pill-btn gold", `Switch to ${state.format_hint}`);
@@ -166,9 +194,11 @@
       const key = state.hotkey.combo ? ` or press ${prettyKey(state.hotkey.combo)}` : "";
       empty.append(el("p", "", state.settings.auto_capture
         ? "Auto-capture is on, please give the game time to show all the results!"
-        : state.lobby === 12
-          ? `Hit Capture${key} once the scoreboard finishes adding points`
-          : `Hit Capture${key} the moment the scoreboard starts moving`));
+        : state.settings.auto_lobby
+          ? `Hit Capture${key} the moment the scoreboard starts moving (or in 12p: once it finishes adding points)`
+          : state.lobby === 12
+            ? `Hit Capture${key} once the scoreboard finishes adding points`
+            : `Hit Capture${key} the moment the scoreboard starts moving`));
       board.replaceChildren(empty);
       return;
     }
@@ -453,8 +483,13 @@
   // draw
   function draw() {
     document.documentElement.dataset.bg = state.settings.background;
-    drawSeg("seg-lobby", [[24, "24"], [12, "12"]], state.lobby, (v) => post("settings", { lobby: v }));
-    drawSeg("seg-format", state.formats.map((f) => [f, f]), state.format, (v) => post("settings", { format: v }));
+    const s = state.settings;
+    drawAutoSeg("seg-lobby", [[24, "24"], [12, "12"]], state.lobby, s.auto_lobby, state.lobby_decided,
+      "Automatically picks 12p or 24p based on the tags seen in a capture",
+      (v) => post("settings", v === "auto" ? { auto_lobby: !s.auto_lobby } : { lobby: v }));
+    drawAutoSeg("seg-format", state.formats.map((f) => [f, f]), state.format, s.auto_format, !!state.format_auto,
+      "Automatically picks a format based on the tags seen in a capture",
+      (v) => post("settings", v === "auto" ? { auto_format: !s.auto_format } : { format: v }));
     drawRace();
     drawMessage();
     drawNotices();

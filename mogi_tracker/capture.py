@@ -294,14 +294,17 @@ def stream(source="monitor", count=BURST_COUNT, monitor=1, camera=""):
     """Yield up to `count` frames (PIL images) as they are taken.
 
     Each frame is handled by its own thread so reading one frame does not delay grabbing the
-    next one
+    next one. Closing it early stops the grabbing
     """
     q = queue.Queue()
+    stop = threading.Event()
 
     def produce():
         try:
             with _lock:
                 for frame in _frames(source, count, monitor, camera):
+                    if stop.is_set():
+                        break
                     q.put(frame)
         except Exception as e:
             q.put(e)
@@ -309,13 +312,16 @@ def stream(source="monitor", count=BURST_COUNT, monitor=1, camera=""):
             q.put(None)
 
     threading.Thread(target=produce, daemon=True).start()
-    while True:
-        item = q.get()
-        if item is None:
-            return
-        if isinstance(item, Exception):
-            raise item if isinstance(item, CaptureError) else CaptureError(f"Could not capture: {item}")
-        yield item
+    try:
+        while True:
+            item = q.get()
+            if item is None:
+                return
+            if isinstance(item, Exception):
+                raise item if isinstance(item, CaptureError) else CaptureError(f"Could not capture: {item}")
+            yield item
+    finally:
+        stop.set()
 
 
 def release():

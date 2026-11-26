@@ -197,6 +197,10 @@ button { cursor: pointer; }
 }
 .seg button:hover { color: #fff; background: rgba(255, 255, 255, 0.14); }
 .seg button[aria-pressed="true"] { color: var(--ui-ink); background: #fff; box-shadow: 0 2px 0 rgba(0, 0, 0, 0.3); }
+.seg.is-auto button:not(.auto-pill) { opacity: 0.6; }
+.seg.is-auto button:not(.auto-pill):hover { opacity: 1; }
+.seg button.auto-pick, .seg button.auto-guess { opacity: 1; outline: 1.5px solid rgba(255, 255, 255, 0.85); outline-offset: -2px; }
+.seg button.auto-guess { outline-style: dashed; outline-color: rgba(255, 255, 255, 0.6); }
 .stepper { align-items: center; }
 .stepper button { min-width: 30px; padding: 6px 8px; font-size: 15px; line-height: 1; }
 .stepper button:disabled { opacity: 0.35; pointer-events: none; }

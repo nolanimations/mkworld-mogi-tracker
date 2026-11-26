@@ -413,6 +413,45 @@ def suggest_team_format(names, selected_format: str, lobby_size: int = 24):
     return None
 
 
+FIT_SLACK = 1 / 12   # one misread name in 12 may sit in the wrong group, the format can still fit
+FFA_ALONE = 1 / 4    # FFA: at least this share of the room shares its first character with nobody,
+FFA_AWAY = 1 / 6     # and every team format is more than this share of the room away
+
+
+def _tag_keys():
+    first = lambda p: get_first_char_key(p["full_name"])   # noqa E731
+    lead = lambda n: lambda p: extract_leading_token(p["full_name"])[:n] or first(p)   # noqa E731
+    return first, lead(2), lead(3)
+
+
+def _misplaced(sizes, expected_teams, team_size):
+    """Players that would have to move for the groups to be `expected_teams` full teams"""
+    top = sorted(sizes, reverse=True)[:expected_teams]
+    return sum(max(0, team_size - s) for s in top) + (expected_teams - len(top)) * team_size
+
+
+def detect_format(names, lobby_size=24):
+    """The format of a (nearly) full room by its tags: team format, FFA, or None if it can't tell"""
+    if not lobby_size - int(FIT_SLACK * lobby_size) <= len(names) <= lobby_size:
+        return None
+    players = [{"full_name": n} for n in names]
+    away = {}
+    for key in _tag_keys():
+        sizes = [len(v) for v in bucket_by(players, key).values()]
+        for fmt in formats_for(lobby_size)[1:]:
+            info = parse_team_format(fmt, lobby_size)
+            away[fmt] = min(away.get(fmt, lobby_size), _misplaced(sizes, info["expected_teams"], info["team_size"]))
+    closest = min(away.values())
+    fits = [fmt for fmt, n in away.items() if n == closest]
+    if closest <= int(FIT_SLACK * lobby_size):
+        return fits[0] if len(fits) == 1 else None
+    firsts = collections.Counter(get_first_char_key(n) for n in names)
+    alone = sum(1 for n in names if firsts[get_first_char_key(n)] == 1)
+    if alone >= FFA_ALONE * lobby_size and closest > FFA_AWAY * lobby_size:
+        return FFA
+    return None
+
+
 def build_players(raw_data):
     """[{"full_name", "white_score", "green_score"}]."""
     players = []

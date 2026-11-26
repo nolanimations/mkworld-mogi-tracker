@@ -8,7 +8,7 @@ import re
 import unicodedata
 
 from . import teams
-from .session import CustomTags
+from .session import AutoSetup, CustomTags
 
 TOTAL_RACES = 12
 POINTS_PER_RACE = {24: 144, 12: 82}
@@ -32,9 +32,9 @@ def player_key(name) -> str:
     return re.sub(r"\s+", "", unicodedata.normalize("NFKC", str(name or ""))).translate(_FOLD).casefold()
 
 
-class Session(CustomTags):
+class Session(CustomTags, AutoSetup):
     _FIELDS = ("lobby", "format", "bank", "live", "display", "members", "last_players", "prev_totals", "prev_ranks",
-               "roster", "absent", "suggestions", "custom")
+               "roster", "absent", "suggestions", "custom", "format_auto", "format_vote")
 
     def __init__(self, lobby=24, fmt="4v4", races=TOTAL_RACES):
         self.lobby = lobby
@@ -55,6 +55,8 @@ class Session(CustomTags):
         self.roster = []
         self.absent = {}
         self.suggestions = []
+        self.format_auto = None
+        self.format_vote = None
 
     # undo
     def _push_undo(self, label):
@@ -103,19 +105,21 @@ class Session(CustomTags):
         }
 
     # setup
-    def set_lobby(self, lobby):
+    def set_lobby(self, lobby, undo=True):
         if lobby == self.lobby:
             return
-        self._push_undo("room size")
+        if undo:
+            self._push_undo("room size")
         self.lobby = lobby
         if self.format not in teams.formats_for(lobby):
             self.format = "4v4"
         self.last_players, self.roster, self.absent = [], [], {}
 
-    def set_format(self, fmt):
+    def set_format(self, fmt, undo=True):
         if fmt == self.format or fmt not in teams.formats_for(self.lobby):
             return
-        self._push_undo("format")
+        if undo:
+            self._push_undo("format")
         self.format = fmt
         self._regroup()
 
@@ -152,9 +156,10 @@ class Session(CustomTags):
         return [{"name": p["name"], "pk": player_key(p["name"]), "total": p["total_score"],
                  "key": team_key(p.get("team_identifier") or "NoTag")} for p in grouped]
 
-    def apply_capture(self, players, tidy_board=True):
-        grouped = self._group(players)
+    def apply_capture(self, players, tidy_board=True, lobby=None, auto_format=False):
         self._push_undo("capture")
+        self._auto_setup(players, lobby, auto_format)
+        grouped = self._group(players)
         totals_before, ranks_before, live_before = self._totals(), self._ranks(), dict(self.live)
         had_scores = any(totals_before.values())
         self._apply_grouped(grouped)
@@ -385,5 +390,7 @@ class Session(CustomTags):
             "suggestions": [{"id": s["id"], "kind": s["kind"], "text": s["text"], "button": s["button"]}
                             for s in self.suggestions],
             "format_hint": self.format_hint(),
+            "format_auto": self.format_auto,
+            "captured": bool(self.last_players),
             "undo": self.undo_label(),
         }

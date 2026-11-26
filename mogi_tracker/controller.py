@@ -1,4 +1,5 @@
 # time to glue
+import itertools
 import json
 import logging
 import os
@@ -21,6 +22,7 @@ LOW_RES = 1080  # a camera picture under this many lines: 24p tends to fail (720
 
 
 class Controller:
+    lobby_pending = False       # Auto player count was switched on mid-mogi: the next capture decides
     def __init__(self):
         first_run = not settings.exists()
         self.settings = settings.load()
@@ -60,10 +62,12 @@ class Controller:
                 "message": self.message,
                 "settings": {k: self.settings[k] for k in
                              ("source", "monitor", "camera", "my_tag", "mark_my_tag", "auto_copy", "auto_capture",
-                              "auto_accept", "overlay_layout", "background", "player_points")},
+                              "auto_accept", "overlay_layout", "background", "player_points", "auto_lobby",
+                              "auto_format")},
                 "hotkey": {"combo": self.hotkey.combo, "recording": self.hotkey.recording},
                 "watching": {"on": self.watcher is not None, "error": self.watch_error},
                 "camera_size": capture.camera_size(),
+                "lobby_decided": not self._detect_lobby(),
                 "overlay_url": f"http://127.0.0.1:{self.port}/overlay",
                 "overlay_file": self.overlay_file,
                 "version": __version__,
@@ -165,21 +169,37 @@ class Controller:
         threading.Thread(target=self._capture_job, daemon=True).start()
         return True
 
+    def _detect_lobby(self):
+        """Auto player count is decided at the first capture of a mogi, or the first one after Auto was switched on"""
+        return self.settings["auto_lobby"] and (self.lobby_pending or not self.session.last_players)
+
     def _capture_job(self):
+        shots = None
         try:
             lobby = self.session.lobby
+            detect = self._detect_lobby()
             start = time.perf_counter()
             frames = []
+            shots = capture.stream(self.settings["source"], 1 if lobby == 12 and not detect else capture.BURST_COUNT,
+                                   self.settings["monitor"], self.settings["camera"])
 
             def taken():
-                for frame in capture.stream(self.settings["source"], 1 if lobby == 12 else capture.BURST_COUNT,
-                                            self.settings["monitor"], self.settings["camera"]):
+                for frame in shots:
                     if self.cancelled:
                         return
                     frames.append(frame)
                     yield frame
 
-            result = ocr.analyze(taken(), lobby)
+            images = taken()
+            if detect:
+                first = next(images, None)
+                img = ocr.to_bgr(first) if first is not None else None
+                ranks = ocr.board_ranks(img) if img is not None else {}
+                if ocr.ranks_in_order(ranks=ranks):
+                    lobby = ocr.lobby_of(ranks)
+                images = itertools.chain([first] if first is not None else [], images if lobby == 24 else [])
+            result = ocr.analyze(images, lobby)
+            shots.close()
             if self.cancelled:
                 self.say("Capture cancelled")
                 return
@@ -201,6 +221,8 @@ class Controller:
             log.exception("capture failed")
             self.say(f"Capture failed: {e}", "bad")
         finally:
+            if shots is not None:
+                shots.close()
             self.busy = False
             self.changed()
 
@@ -208,18 +230,28 @@ class Controller:
         with self.lock:
             if auto and self.session.same_board(players):
                 return     # already captured
-            self.session.apply_capture(players, tidy_board=tidy)
+            before = (self.session.lobby, self.session.format)
+            detect = self._detect_lobby()
+            self.session.apply_capture(players, tidy_board=tidy, lobby=lobby if detect else None,
+                                       auto_format=self.settings["auto_format"])
+            if detect:
+                self.lobby_pending = False
             if self.settings["auto_accept"]:
                 for s in self.session.accept_corrections():
                     log.info("auto-accepted: %s", s["done"])
             race = self.session.race_info()["number"]
+            picked = [f"{self.session.lobby} players" if self.session.lobby != before[0] else "",
+                      self.session.format if before[1] != self.session.format == self.session.format_auto else ""]
+        picked = "Auto picked " + " and ".join(p for p in picked if p) + ". " if any(picked) else ""
+        if picked:
+            log.info(picked)
         copied = self.settings["auto_copy"] and self._copy_scores()
         if len(players) < lobby:
-            self.say(f"Only {len(players)} of {lobby} players were read.", "bad")
+            self.say(f"{picked}Only {len(players)} of {lobby} players were read.", "bad")
         elif auto:
-            self.say(f"Race {race} captured" + (", scores copied" if copied else ""), "good")
+            self.say(f"{picked}Race {race} captured" + (", scores copied" if copied else ""), "good")
         else:
-            self.say("Scores copied." if copied else "", "good")
+            self.say((picked + ("Scores copied." if copied else "")).strip(), "good")
 
     @staticmethod
     def _save_last_capture(frames, record):
@@ -245,8 +277,9 @@ class Controller:
             self.watcher, self.watch_error = None, ""
         if want and not self.watcher:
             self._watch_source = source
-            self.watcher = autocapture.Watcher(*source[:2], lambda: self.session.lobby, self._auto_begin,
-                                               self._auto_result, self._auto_error, camera=source[2]).start()
+            self.watcher = autocapture.Watcher(*source[:2], lambda: None if self._detect_lobby() else self.session.lobby,
+                                               self._auto_begin, self._auto_result, self._auto_error,
+                                               camera=source[2]).start()
 
     def _auto_begin(self):
         with self.lock:
@@ -387,11 +420,20 @@ class Controller:
 
     def _do_settings(self, data):
         if data.get("lobby") in settings.OPTIONS["lobby"]:
+            self.settings["auto_lobby"] = False     # picked by hand
             self.session.set_lobby(data["lobby"])
             if self.session.lobby == 12:
                 self.say("capture once the scoreboard finishes adding points")
         if "format" in data:
+            self.settings["auto_format"] = False
             self.session.set_format(str(data["format"]))
+        if data.get("auto_lobby") is True and not self.settings["auto_lobby"]:
+            self.lobby_pending = True
+        for key in ("auto_lobby", "auto_format"):
+            if isinstance(data.get(key), bool):
+                self.settings[key] = data[key]
+        if data.get("auto_format") is True:
+            self.session.detect_format_now()
         races = data.get("races")
         if isinstance(races, int) and not isinstance(races, bool) and settings.RACES[0] <= races <= settings.RACES[1]:
             self.session.races = self.settings["races"] = races

@@ -182,19 +182,32 @@ def board_signal(img, x_from=0):
     return float(scores[best]) / base, float(scores[best]), rows
 
 
-def ranks_in_order(img) -> bool:
-    """True if the rank column of a 1080p BGR frame reads like results"""
+def board_ranks(img) -> dict:
+    """{row: printed rank} down the rank column of a 1080p BGR frame. The rows of a 24p board fit a 12p one too"""
     tops = row_tops(img, 24)
     team = team_board(img, tops)
     crops = [(ti, crop_field(img, "rank", top, team)) for ti, top in enumerate(tops)]
     crops = [(ti, c) for ti, c in crops if c is not None]
-    if not crops:
-        return False
     ranks = {}
-    for (ti, _), (text, _conf) in zip(crops, get_reader().recognise([c for _, c in crops])):
+    for (ti, _), (text, _conf) in zip(crops, get_reader().recognise([c for _, c in crops]) if crops else []):
         rank = parse_int(text)
         if rank is not None and 1 <= rank <= 24:
             ranks[ti] = rank
+    return ranks
+
+
+def lobby_of(ranks) -> int:
+    """When a 24p scoreboard finishes scrolling it still shows top 13, so even if the user manually captured waaaay too late, 24p can still be correctly detected"""
+    for row, r in ranks.items():
+        above = ranks.get(row - 1)
+        if row >= 12 or (r > 12 and above is not None and r in (above, above + 1)):
+            return 24
+    return 12
+
+
+def ranks_in_order(img=None, ranks=None) -> bool:
+    """True if the rank column of a 1080p BGR frame (or its board_ranks) reads like results"""
+    ranks = board_ranks(img) if ranks is None else ranks
     # ties
     steps = wrong = tied = 0
     for ti in sorted(ranks):

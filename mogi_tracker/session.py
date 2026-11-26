@@ -85,9 +85,35 @@ class CustomTags:
         return rows
 
 
-class Session(CustomTags):
+class AutoSetup:
+    """Auto player count and format"""
+
+    def _auto_setup(self, players, lobby, auto_format):
+        """Part of a capture's undo step"""
+        if lobby and lobby != self.lobby:
+            self.set_lobby(lobby, undo=False)
+        if auto_format:
+            self._vote_format([p["full_name"] for p in players], undo=False)
+
+    def _vote_format(self, names, undo=True):
+        verdict = teams.detect_format(names, self.lobby)
+        if verdict is None:
+            return
+        if self.format_auto is None or verdict == self.format_vote:
+            self.format_auto, self.format_vote = verdict, None
+            self.set_format(verdict, undo=undo)
+        else:
+            self.format_vote = None if verdict == self.format_auto else verdict
+
+    def detect_format_now(self):
+        self.format_auto = self.format_vote = None
+        if self.last_players:
+            self._vote_format([p["name"] for p in self.last_players])
+
+
+class Session(CustomTags, AutoSetup):
     _FIELDS = ("lobby", "format", "bank", "display", "places", "last_players", "prev_totals", "prev_ranks",
-               "suggestions", "custom", "old_room", "room_before")
+               "suggestions", "custom", "old_room", "room_before", "format_auto", "format_vote")
 
     def __init__(self, lobby=24, fmt="4v4", races=TOTAL_RACES):
         self.lobby = lobby
@@ -107,6 +133,8 @@ class Session(CustomTags):
         self.suggestions = []
         self.old_room = []
         self.room_before = []
+        self.format_auto = None
+        self.format_vote = None
         self._offered = set()
         self._points_before = 0
         self._declined = set()
@@ -178,19 +206,21 @@ class Session(CustomTags):
         }
 
     # setup
-    def set_lobby(self, lobby):
+    def set_lobby(self, lobby, undo=True):
         if lobby == self.lobby:
             return
-        self._push_undo("room size")
+        if undo:
+            self._push_undo("room size")
         self.lobby = lobby
         if self.format not in teams.formats_for(lobby):
             self.format = "4v4"
         self.last_players, self.places = [], []
 
-    def set_format(self, fmt):
+    def set_format(self, fmt, undo=True):
         if fmt == self.format or fmt not in teams.formats_for(self.lobby):
             return
-        self._push_undo("format")
+        if undo:
+            self._push_undo("format")
         self.format = fmt
         self._regroup()
 
@@ -297,9 +327,11 @@ class Session(CustomTags):
         return ([(pl, p) for pl, p in slots if pl is not None and p is not None],
                 [p for pl, p in slots if pl is None], [pl for pl, p in slots if p is None])
 
-    def apply_capture(self, players, tidy_board=True):
-        grouped = self._group(players)
+    def apply_capture(self, players, tidy_board=True, lobby=None, auto_format=False):
+        """lobby: the player count auto read off this board, auto_format: let the tags pick the format"""
         self._push_undo("capture")
+        self._auto_setup(players, lobby, auto_format)
+        grouped = self._group(players)
         totals_before, ranks_before = self._totals(), self._ranks()
         had_scores = any(totals_before.values())
         live_before = self.live
@@ -871,5 +903,7 @@ class Session(CustomTags):
             "suggestions": [{"id": s["id"], "kind": s["kind"], "text": s["text"], "button": s["button"]}
                             for s in self.suggestions],
             "format_hint": self.format_hint(),
+            "format_auto": self.format_auto,
+            "captured": bool(self.last_players),
             "undo": self.undo_label(),
         }
