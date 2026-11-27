@@ -90,6 +90,9 @@ def play(lobby, fmt, seed, eleven=0.0, partial=0.0, skip=0.15, noise=0.12, tag_n
         got[tag] = got.get(tag, 0) + row["total"]
     assert got == truth, (seed, got, truth)
     assert s.race_info() == {"number": 12, "of": 12, "left": 0, "grand": 12 * sum(table), "delta": 0}
+    indivs = {name: sum(parts) for tag, lines, extra in s.indivs() for name, parts, races in lines}
+    assert indivs == {p.split(" ", 1)[1]: x for p, x in owed.items()}, seed
+    assert all(extra == 0 for _, _, extra in s.indivs())
 
 
 @pytest.mark.parametrize("fmt", ["2v2", "3v3", "6v6"])

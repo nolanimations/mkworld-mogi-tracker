@@ -367,6 +367,19 @@ class Session(CustomTags, AutoSetup):
             r["short"] = full if first_chars[r["key"][0]] > 1 else full[0]
         return self._with_custom(rows)
 
+    def indivs_text(self):
+        blocks = []
+        for row in self.standings():
+            people = sorted(self.members.get(row["key"], []), key=lambda m: -m["total"])
+            lines = [f"{m['name']} {m['total']}" for m in people]
+            extra = self.bank.get(row["key"], 0)
+            if extra:
+                lines.append(f"{'Penalty' if extra < 0 else 'Bonus'} {extra:+}")
+            blocks.append(lines if self.format == teams.FFA else [row["tag"]] + lines)
+        if self.format == teams.FFA:
+            return "\n".join(line for block in blocks for line in block)
+        return "\n\n".join("\n".join(block) for block in blocks)
+
     def clipboard_text(self, my_tag="", mark_mine=True):
         """`A 120 | B 98 | @7`"""
         rows = self.standings(my_tag)

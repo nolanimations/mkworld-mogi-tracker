@@ -495,6 +495,11 @@ kbd {
 }
 .menu-item:hover, .menu-item:focus-visible { background: var(--drawer-line); outline: 0; }
 .menu-item[aria-checked="true"]::before { content: "✓"; position: absolute; left: 11px; color: var(--accent); font-weight: 800; }
+.copy-pick { position: relative; display: flex; }
+.copy-pick #btn-copy { border-radius: 999px 0 0 999px; padding-right: 16px; }
+.pill-btn.copy-more { border-radius: 0 999px 999px 0; padding: 0 14px 0 11px; margin-left: 2px; font-size: 13px; }
+.menu.up { top: auto; bottom: calc(100% + 8px); left: auto; right: 0; min-width: 150px; }
+.copy-pick .menu-item { padding-left: 12px; }
 .menu-note { margin: 0; padding: 8px 12px; font-size: 12.5px; color: var(--drawer-muted); }
 .drawer .seg { background: var(--drawer-seg); box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
 .drawer .seg button { color: var(--drawer-muted); }

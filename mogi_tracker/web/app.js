@@ -515,14 +515,28 @@
   for (const [type, on] of [["mouseenter", true], ["mouseleave", false]]) {
     $("btn-capture").addEventListener(type, () => { captureHover = on; if (state) drawDock(); });
   }
-  $("btn-copy").addEventListener("click", async () => {
-    const out = await post("copy");
+  // Copy
+  async function copy(what) {
+    const out = await post("copy", { what });
     if (!out.ok) return;
     const b = $("btn-copy");
     b.textContent = "Copied";
     b.classList.add("done");
     setTimeout(() => { b.textContent = "Copy"; b.classList.remove("done"); }, 1600);
-  });
+  }
+
+  function openCopyMenu(open) {
+    $("copy-menu").hidden = !open;
+    $("btn-copy-more").setAttribute("aria-expanded", String(open));
+    if (open) $("copy-menu").querySelector(".menu-item").focus();
+  }
+
+  $("btn-copy").addEventListener("click", () => copy("totals"));
+  $("btn-copy").addEventListener("contextmenu", (e) => { e.preventDefault(); openCopyMenu(true); });
+  $("btn-copy-more").addEventListener("click", (e) => { e.stopPropagation(); openCopyMenu($("copy-menu").hidden); });
+  for (const item of $("copy-menu").querySelectorAll(".menu-item")) {
+    item.addEventListener("click", () => { openCopyMenu(false); copy(item.dataset.what); });
+  }
   $("btn-undo").addEventListener("click", () => post("undo"));
   confirmButton("btn-bank", "Click again to bank", () => post("bank_all"));
   confirmButton("btn-reset", "Click again to clear", () => post("reset"));
@@ -551,10 +565,14 @@
   $("scrim").addEventListener("click", () => openDrawer(false));
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape" || state?.hotkey.recording) return;
-    if (!$("camera-menu").hidden) openCameraMenu(false);
+    if (!$("copy-menu").hidden) openCopyMenu(false);
+    else if (!$("camera-menu").hidden) openCameraMenu(false);
     else openDrawer(false);
   });
-  document.addEventListener("click", (e) => { if (!$("camera-menu").hidden && !e.target.closest("#camera-menu")) openCameraMenu(false); });
+  document.addEventListener("click", (e) => {
+    if (!$("camera-menu").hidden && !e.target.closest("#camera-menu")) openCameraMenu(false);
+    if (!$("copy-menu").hidden && !e.target.closest("#copy-menu")) openCopyMenu(false);
+  });
   $("btn-hotkey").addEventListener("click", () => post("hotkey"));
   $("btn-hotkey-clear").addEventListener("click", () => post("hotkey", { clear: true }));
   $("my-tag").addEventListener("change", (e) => post("settings", { my_tag: e.target.value }));

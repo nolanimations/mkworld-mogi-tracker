@@ -11,6 +11,7 @@ import copy
 import difflib
 import itertools
 import math
+import os
 import re
 import unicodedata
 
@@ -42,6 +43,54 @@ def player_key(name) -> str:
 
 def _points(n):
     return f"{n} point" if n == 1 else f"{n} points"
+
+
+def _s(n):
+    return "" if n == 1 else "s"
+
+
+def _sum(parts):
+    """68+1, 40+28-5 etc"""
+    parts = [p for p in parts if p] or [0]
+    return str(parts[0]) + "".join(f"{p:+}" for p in parts[1:])
+
+
+def _merge(people):
+    """The segments of one place by the same player (eg. rejoin) are merged"""
+    out = []
+    for seg in people:
+        same = next((o for o in out if o.get("who") == seg.get("who") or
+                     (not o.get("origin") and not seg.get("origin") and
+                      _alike(player_key(o["name"]), player_key(seg["name"])) >= NAME_MATCH)), None)
+        if same:
+            same["name"] = seg["name"]          # later: read more often
+            same["parts"] = same["parts"] + seg["parts"]
+            same["races"] += seg["races"]
+            same["subbed"] = same.get("subbed", False) or seg.get("subbed", False)
+        else:
+            out.append({"subbed": False, **seg, "parts": list(seg["parts"])})
+    return out
+
+
+def _common_tag(names):
+    if len(names) < 2:
+        return ""
+    common = os.path.commonprefix([teams.upper_latin(n) for n in names])
+    if re.search(r"\s", common):
+        return common[:max(i for i, ch in enumerate(common) if ch.isspace())].strip()
+    tag = re.sub(r"[\W_]+$", "", common)
+    return tag if tag and all(len(n) > len(tag) and not n[len(tag)].isalnum() for n in names) else ""
+
+
+def _without_tag(name, tags):
+    upper = teams.upper_latin(name)
+    for tag in tags:
+        t = teams.upper_latin("".join(str(tag or "").split()))
+        if t and upper.startswith(t) and len(name) > len(t) and not name[len(t)].isalnum():
+            rest = re.sub(r"^[\W_]+", "", name[len(t):])
+            if rest:
+                return rest
+    return name
 
 
 def _alike(a, b):
@@ -113,7 +162,7 @@ class AutoSetup:
 
 class Session(CustomTags, AutoSetup):
     _FIELDS = ("lobby", "format", "bank", "display", "places", "last_players", "prev_totals", "prev_ranks",
-               "suggestions", "custom", "old_room", "room_before", "format_auto", "format_vote")
+               "suggestions", "custom", "old_room", "room_before", "format_auto", "format_vote", "banked")
 
     def __init__(self, lobby=24, fmt="4v4", races=TOTAL_RACES):
         self.lobby = lobby
@@ -133,6 +182,8 @@ class Session(CustomTags, AutoSetup):
         self.suggestions = []
         self.old_room = []
         self.room_before = []
+        self.banked = {}
+        self._race_now = 0
         self.format_auto = None
         self.format_vote = None
         self._offered = set()
@@ -237,7 +288,8 @@ class Session(CustomTags, AutoSetup):
         pk = player_key(p["name"])
         place = {"id": max((pl["id"] for pl in self.places), default=0) + 1, "origin": pk, "aliases": [pk],
                  "pk": pk, "name": p["name"], "total": p["total_score"], "carried": 0, "away": False,
-                 "stand_in": False, "votes": {}, "team": None, "order": order, "start": None, "last": None}
+                 "stand_in": False, "votes": {}, "team": None, "order": order, "start": None, "last": None,
+                 "past": [], "fixes": [], "since": self._race_now, "seen": self._race_now}
         self.places.append(place)
         return place
 
@@ -331,6 +383,7 @@ class Session(CustomTags, AutoSetup):
         """lobby: the player count auto read off this board, auto_format: let the tags pick the format"""
         self._push_undo("capture")
         self._auto_setup(players, lobby, auto_format)
+        self._race_now = self.race_info()["number"]          # races before this capture
         grouped = self._group(players)
         totals_before, ranks_before = self._totals(), self._ranks()
         had_scores = any(totals_before.values())
@@ -362,6 +415,7 @@ class Session(CustomTags, AutoSetup):
                               done=f"Looks like a reopen, banked the old room's {_points(sum(live_before.values()))}")
                 for pl, p in pairs:
                     pl["carried"], pl["away"], pl["stand_in"], pl["start"] = 0, False, False, 0
+                    pl["past"], pl["fixes"] = [], []
                 self.places = [pl for pl, _ in pairs]
                 notes = []
             else:
@@ -383,6 +437,9 @@ class Session(CustomTags, AutoSetup):
             self._eleven_player_start(pairs)
         for text in notes:
             self._suggest(f"note:{len(self.suggestions)}", "note", text, None, [])
+        race = self.race_info()["number"]
+        for pl, _ in pairs:
+            pl["seen"] = race
         self.last_players = [{"name": p["name"], "total": p["total_score"]} for p in grouped]
         self.prev_totals = totals_before if had_scores else None
         self.prev_ranks = ranks_before if had_scores else None
@@ -483,13 +540,14 @@ class Session(CustomTags, AutoSetup):
             team = self._tag(pl["team"])
             if fresh:
                 pl["start"] = 0
-            if pl.get("open"):                    # sub fills the room's open spot
-                pl.update(open=False, origin=pk, aliases=[pk], stand_in=False)
+            if pl.get("open"):                    # sub
+                pl.update(open=False, origin=pk, aliases=[pk], stand_in=False, since=self._race_now)
                 notes.append(f"{p['name']} took the open spot on {team}"
                              + (f", the {_points(pl['carried'])} it held count for them" if pl["carried"] else ""))
                 steady.append((pl, p["total_score"]))
                 continue
             if fresh:
+                self._next_occupant(pl)
                 if origin:
                     had = f"their {_points(pl['total'])} from before" if pl["away"] or pl["name"] == p["name"] \
                         else f"the {_points(pl['total'])} {pl['name']} had for them"
@@ -592,10 +650,28 @@ class Session(CustomTags, AutoSetup):
         wrong = players - sum(n for g, n in count.items() if n <= table.count(g))
         return table if players * 2 >= self.lobby and wrong * 6 <= players else None
 
-    @staticmethod
-    def _had(pl, earlier=True):
+    def _had(self, pl, earlier=True):
         return {"names": pl["aliases"] or [pl["pk"]],
-                "points": pl["total"] + pl["carried"] + (pl.get("earlier", 0) if earlier else 0)}
+                "points": pl["total"] + pl["carried"] + (pl.get("earlier", 0) if earlier else 0),
+                "team": pl["team"], "segs": copy.deepcopy(self._segments(pl, earlier))}
+
+    # for indivs
+    def _shown_name(self, pl):
+        names = None if pl["stand_in"] else pl.get("names")
+        return max(names, key=names.get) if names else pl["name"]
+
+    def _occupant(self, pl):
+        return {"name": self._shown_name(pl), "parts": [pl["total"]] + pl.get("fixes", []),
+                "races": max(0, pl.get("seen", 0) - pl.get("since", 0)),
+                "who": pl["pk"] if pl["stand_in"] else pl["origin"], "origin": not pl["stand_in"]}
+
+    def _next_occupant(self, pl):
+        """Someone (else) starts over in a place"""
+        pl.setdefault("past", []).append(self._occupant(pl))
+        pl["fixes"], pl["since"] = [], self._race_now
+
+    def _segments(self, pl, earlier=True):
+        return (pl.get("earlier_segs", []) if earlier else []) + pl.get("past", []) + [self._occupant(pl)]
 
     def _bring_over(self, places):
         """Players keep the points they had in banked rooms for their own standings"""
@@ -606,6 +682,7 @@ class Session(CustomTags, AutoSetup):
             if ratio >= NAME_MATCH and i not in used_i and j not in used_j:
                 used_i.add(i), used_j.add(j)
                 places[i]["earlier"] = places[i].get("earlier", 0) + self.old_room[j]["points"]
+                places[i]["earlier_segs"] = places[i].get("earlier_segs", []) + self.old_room[j].get("segs", [])
         self.old_room = [old for j, old in enumerate(self.old_room) if j not in used_j]
 
     def _eleven_player_start(self, pairs):
@@ -624,7 +701,7 @@ class Session(CustomTags, AutoSetup):
             return              # can't tell which team is short so the race shows 15 points missing instead
         spot = {"id": max(pl["id"] for pl in self.places) + 1, "origin": "", "aliases": [], "pk": "",
                 "name": OPEN_SPOT, "total": 0, "carried": 0, "away": True, "stand_in": False, "votes": {},
-                "team": short[0], "order": 11, "open": True}
+                "team": short[0], "order": 11, "open": True, "past": [], "fixes": [], "since": 0, "seen": 0}
         self.places.append(spot)
         self._eleven_players([(pl, p["total_score"]) for pl, p in pairs], [spot])
 
@@ -722,7 +799,8 @@ class Session(CustomTags, AutoSetup):
     # suggestions and notes
     def _suggest(self, sid, kind, text, button, adds, done="", sure=True, score=0):
         team = {pl["id"]: pl["team"] for pl in self.places}
-        adds = [{"team": team.get(a.get("place")), **a} for a in adds]
+        seat = {pl["id"]: len(pl.get("past", [])) for pl in self.places}
+        adds = [{"team": team.get(a.get("place")), "seat": seat.get(a.get("place")), **a} for a in adds]
         self.suggestions = [s for s in self.suggestions if s["id"] != sid]
         self.suggestions.append({"id": sid, "kind": kind, "text": text, "button": button, "adds": adds,
                                  "done": done, "sure": sure, "score": score})
@@ -752,12 +830,19 @@ class Session(CustomTags, AutoSetup):
             self._bring_over(self.places)
         for add in s["adds"]:
             if "place" in add and add["place"] in places:
-                places[add["place"]]["carried"] += add["points"]
+                pl = places[add["place"]]
+                pl["carried"] += add["points"]
+                past = pl.setdefault("past", [])
+                seat = add.get("seat")
+                (past[seat]["parts"] if seat is not None and seat < len(past) else pl.setdefault("fixes", [])) \
+                    .append(add["points"])
             else:
                 key = add.get("key") or add["team"]
                 if not key:
                     continue
                 self.bank[key] = self.bank.get(key, 0) + add["points"]
+                if s["kind"] == "room":
+                    self.banked[key] = self.banked.get(key, 0) + add["points"]
                 self.display.setdefault(key, key)
         self.suggestions = [x for x in self.suggestions if x["id"] != s["id"]]
 
@@ -796,6 +881,7 @@ class Session(CustomTags, AutoSetup):
         self._push_undo("bank all")
         for key, pts in live.items():
             self.bank[key] = self.bank.get(key, 0) + pts
+            self.banked[key] = self.banked.get(key, 0) + pts
         self.old_room = self.old_room + [self._had(pl) for pl in self.places]
         self.places, self.last_players = [], []
         self.suggestions = [s for s in self.suggestions if s["kind"] != "room"]
@@ -877,6 +963,52 @@ class Session(CustomTags, AutoSetup):
             if self.format == teams.FFA:
                 r["short"] = r["tag"]
         return self._with_custom(rows)
+
+    def indivs(self):
+        """[(tag or None in FFA, [(name, parts, races or None)], adjustment)] in standings order"""
+        by_team, unfilled = collections.defaultdict(list), collections.Counter()
+        for pl in self.places:
+            if pl.get("open"):                # no sub ever joined
+                unfilled[pl["team"]] += pl["total"] + pl["carried"]
+        chains = [(pl["team"], self._segments(pl)) for pl in self.places if not pl.get("open")]
+        chains += [(old.get("team"), old.get("segs", [])) for old in self.old_room]
+        for team, segs in chains:
+            people = _merge(segs)
+            for person in people:
+                person["subbed"] = len(people) > 1
+            by_team[team] += people
+        out = []
+        for row in self.standings():
+            key = row["key"]
+            people = by_team.get(key, [])
+            people.sort(key=lambda p: -sum(p["parts"]))
+            tags = [_common_tag([p["name"] for p in people]), row["tag"], row.get("read") or row["tag"]]
+            lines = [(_without_tag(p["name"], tags), p["parts"], p["races"] if p["subbed"] else None)
+                     for p in people]
+            extra = self.bank.get(key, 0) - self.banked.get(key, 0) + unfilled[key]
+            if self.format == teams.FFA:
+                if not lines:
+                    continue                  # open spot
+                if extra:
+                    name, parts, races = lines[0]
+                    lines[0], extra = (name, parts + [extra], races), 0
+                out.append((None, lines, extra))
+            else:
+                out.append((row["tag"], lines, extra))
+        return out
+
+    def indivs_text(self):
+        blocks = []
+        for tag, lines, extra in self.indivs():
+            block = [] if tag is None else [tag]
+            for name, parts, races in lines:
+                block.append(f"{name}{f' ({races} race{_s(races)})' if races is not None else ''} {_sum(parts)}")
+            if extra:
+                block.append(f"{'Penalty' if extra < 0 else 'Bonus'} {extra:+}")
+            blocks.append(block)
+        if self.format == teams.FFA:
+            return "\n".join(line for block in blocks for line in block)
+        return "\n\n".join("\n".join(block) for block in blocks)
 
     def clipboard_text(self, my_tag="", mark_mine=True):
         """`A 120 | B 98 | @7`, in FFA a line per player: `Leafeon 106`"""

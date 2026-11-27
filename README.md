@@ -31,6 +31,8 @@ Mario Kart World HAS to be 16:9 fullscreen for this tracker to work at all!
    - **24p:** capture the *moment* the scoreboard starts moving. All the points get read while it moves
    - **12p:** capture once the scoreboard finishes adding points like usual
 4. Also has a text output that you can share: `A 124 | B 73 | C 67 | @8`
+   - Or, click **▾** next to Copy (or right-click it) → **Copy indivs**: every tag with each player's points using that tag, ready to
+     paste into whatever table maker you use
 
 > [!IMPORTANT]
 > Make sure that you either set your OBS Virtual Camera source directly to your capture card, or that there's no stream overlay stuff covering the scoreboard!

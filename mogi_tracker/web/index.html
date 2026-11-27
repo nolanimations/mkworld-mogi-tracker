@@ -64,7 +64,17 @@
   </div>
   <div class="dock-main">
     <span class="auto-chip" id="auto-chip" hidden>AUTO</span>
-    <button class="pill-btn big" id="btn-copy" type="button">Copy</button>
+    <div class="copy-pick">
+      <button class="pill-btn big" id="btn-copy" type="button" title="Right-click for more ways to copy">Copy</button>
+      <button class="pill-btn big copy-more" id="btn-copy-more" type="button" aria-label="More ways to copy"
+              aria-haspopup="menu" aria-expanded="false">▾</button>
+      <div class="menu up" id="copy-menu" role="menu" aria-label="Copy" hidden>
+        <button class="menu-item" type="button" role="menuitem" data-what="totals"
+                title="Total scores per tag">Copy totals</button>
+        <button class="menu-item" type="button" role="menuitem" data-what="indivs"
+                title="Each tag with its players' indivs included">Copy indivs</button>
+      </div>
+    </div>
     <button class="capture" id="btn-capture" type="button">
       <span class="capture-in"><span id="capture-label">CAPTURE</span><kbd id="capture-key" hidden></kbd></span>
     </button>

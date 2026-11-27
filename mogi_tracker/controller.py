@@ -366,12 +366,30 @@ class Controller:
                 return ""
         return text
 
-    def _do_copy(self, _):
+    def _do_copy(self, data):
+        if data.get("what") == "indivs":
+            return self._copy_indivs()
         text = self._copy_scores()
         if not text:
             self.say("Nothing to copy")
             return {"ok": False}
         self.say(f"Copied: {text}", "good")
+        return {"ok": True, "text": text}
+
+    def _copy_indivs(self):
+        import pyperclip
+
+        text = self.session.indivs_text()
+        if not text:
+            self.say("Nothing to copy")
+            return {"ok": False}
+        try:
+            pyperclip.copy(text)
+        except Exception as e:
+            log.warning("could not copy to the clipboard: %s", e)
+            self.say(f"Could not copy: {e}", "bad")
+            return {"ok": False}
+        self.say("Indivs copied", "good")
         return {"ok": True, "text": text}
 
     def _do_bank_all(self, _):
