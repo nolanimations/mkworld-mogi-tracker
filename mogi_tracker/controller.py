@@ -246,7 +246,9 @@ class Controller:
         if picked:
             log.info(picked)
         copied = self.settings["auto_copy"] and self._copy_scores()
-        if len(players) < lobby:
+        # in a room known to be 11 (eg. 11p start) 11 rows is everyone
+        missing = self.session.seats_missing() if hasattr(self.session, "seats_missing") else 0
+        if len(players) + missing < lobby:
             self.say(f"{picked}Only {len(players)} of {lobby} players were read.", "bad")
         elif auto:
             self.say(f"{picked}Race {race} captured" + (", scores copied" if copied else ""), "good")

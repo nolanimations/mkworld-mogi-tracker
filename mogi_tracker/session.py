@@ -82,6 +82,52 @@ def _common_tag(names):
     return tag if tag and all(len(n) > len(tag) and not n[len(tag)].isalnum() for n in names) else ""
 
 
+PLACINGS_MAX_RACES = 4
+PLACINGS_BUDGET = 200_000
+_EXTRA_11P = {12: 2, 10: 1}      # an 11 player race: 1st gets +3, 2nd +2, the rest +1
+
+
+class _TooMany(Exception):
+    pass
+
+
+def _placings(gains, races):
+    """Every way `races` races of 11 can give these gains ({id: points}): the different extra points for 1st and 2nd
+    ({id: extra}) they lead to. None if there are too many ways to go through"""
+    if races > PLACINGS_MAX_RACES:
+        return None
+    combos = {i: [c for c in itertools.product(TABLE_11P, repeat=races) if sum(c) == g] for i, g in gains.items()}
+    order = sorted(gains, key=lambda i: len(combos[i]))
+    used, pick, found, nodes = [set() for _ in range(races)], {}, [], [0]
+
+    def go(n):
+        if n == len(order):
+            extra = {i: sum(_EXTRA_11P.get(x, 0) for x in c) for i, c in pick.items()}
+            extra = {i: e for i, e in extra.items() if e}
+            if extra not in found:
+                found.append(extra)
+            return
+        nodes[0] += 1
+        if nodes[0] > PLACINGS_BUDGET:
+            raise _TooMany
+        i = order[n]
+        for c in combos[i]:
+            if all(c[r] not in used[r] for r in range(races)):
+                for r in range(races):
+                    used[r].add(c[r])
+                pick[i] = c
+                go(n + 1)
+                for r in range(races):
+                    used[r].discard(c[r])
+        pick.pop(i, None)
+
+    try:
+        go(0)
+    except _TooMany:
+        return None
+    return found
+
+
 def _without_tag(name, tags):
     upper = teams.upper_latin(name)
     for tag in tags:
@@ -562,7 +608,11 @@ class Session(CustomTags, AutoSetup):
             elif pk not in pl["aliases"] and not self._is_origin(pl, pk) and not pl["stand_in"]:
                 pl["aliases"].append(pk)
             steady.append((pl, gain(pl, p, fresh)))
-        self._eleven_players(steady, [pl for pl in gone if pl["away"]] if tidy_board else [])
+        away = [pl for pl in gone if pl["away"]] if tidy_board else []
+        self._eleven_players(steady, away)
+        if (complete and not names_changed and not back and not drops and not any(fresh for _, _, fresh in decided)
+                and "comp11" not in self._offered):
+            self._missed_elevens(steady, away)
         return notes, skip
 
     @staticmethod
@@ -575,7 +625,13 @@ class Session(CustomTags, AutoSetup):
         for k in range(1, max(self.races, TOTAL_RACES) + 1):
             if points == per * k or (self.lobby == 12 and points == per * k - (per - sum(TABLE_11P))):
                 return k
+            if k > 1 and self.seats_missing() and points == sum(TABLE_11P) * k:
+                return k
         return None
+
+    def seats_missing(self):
+        """12p room with a spot nobody's in (an 11 player start, or a player who left)"""
+        return sum(1 for pl in self.places if pl.get("open") or pl["away"]) if self.lobby == 12 else 0
 
     @staticmethod
     def _could_start_over(p, races):
@@ -661,7 +717,7 @@ class Session(CustomTags, AutoSetup):
         return max(names, key=names.get) if names else pl["name"]
 
     def _occupant(self, pl):
-        return {"name": self._shown_name(pl), "parts": [pl["total"]] + pl.get("fixes", []),
+        return {"name": self._shown_name(pl), "parts": [pl["total"], sum(pl.get("fixes", []))],   # 68+1: board+fixes
                 "races": max(0, pl.get("seen", 0) - pl.get("since", 0)),
                 "who": pl["pk"] if pl["stand_in"] else pl["origin"], "origin": not pl["stand_in"]}
 
@@ -727,6 +783,40 @@ class Session(CustomTags, AutoSetup):
                            f"({second['name']}), +1 for everyone else and +1 for {missing}",
                       # 15 points: did they miss the race, or rejoin and win?
                       sure=idle[0] in away or idle[0]["total"] != 15)
+
+    def _missed_elevens(self, steady, away):
+        """A capture after 2 or more races of 11 players that weren't captured. +1 for everyone and the empty spot per
+        race is certain, the extra +2 for 1st and +1 for 2nd only if every finishing order that fits the gains agrees"""
+        if self.lobby != 12 or len(steady) != 11 or len(away) != 1:
+            return
+        per = sum(TABLE_11P)
+        gains = {pl["id"]: g for pl, g in steady}
+        k = sum(gains.values()) // per
+        if k < 2 or sum(gains.values()) != per * k or any(not k <= g <= 12 * k for g in gains.values()):
+            return
+        found = _placings(gains, k)
+        if found == []:
+            return
+        sure = found is not None and len(found) == 1
+        extra = found[0] if sure else {}
+        places = {pl["id"]: pl for pl, _ in steady}
+        adds = [{"place": i, "points": k + extra.get(i, 0)} for i in gains] + [{"place": away[0]["id"], "points": k}]
+        races = f"Races {self._race_now + 1}–{self._race_now + k}" if k > 2 else \
+            f"Races {self._race_now + 1} and {self._race_now + 2}"
+        missing = (f"the open spot on {self._tag(away[0]['team'])}" if away[0].get("open") else away[0]["name"])
+        points = sum(a["points"] for a in adds)
+        if sure:
+            tops = ", ".join(f"+{extra[i]} {places[i]['name']}" for i in sorted(extra, key=lambda i: -extra[i]))
+            what = (f"+1 for everyone and for {missing} per race, and for finishing 1st and 2nd: {tops} (the only "
+                    f"way the points add up)")
+        else:
+            could = sorted({places[i]["name"] for e in (found or []) for i in e if e[i]})
+            what = (f"+1 for everyone and for {missing} per race. Who finished 1st and 2nd can't be told from the "
+                    f"totals, so {3 * k} more points are missing" +
+                    (f" (they go to some of {', '.join(could)})" if could else "") + ". Add those by hand")
+        self._suggest("comp11", "comp11", f"{races} weren't captured, all with 11 players. {what}",
+                      f"Add {points} points", adds, done=f"{races} were 11 player races, added {_points(points)}: {what}",
+                      sure=sure)
 
     def _vote_teams(self, pairs):
         """Each place votes for the team its group belongs to (stand-ins don't vote)"""
